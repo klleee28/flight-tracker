@@ -1,0 +1,69 @@
+# Python / Backend
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Databases & Local Storage
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Temporary test outputs & screenshots
+*.log
+backend/*.png
+backend/*.txt
+!backend/requirements.txt
+backend/test_*.png
+backend/dashboard_screenshot.png
+backend/refresh_test.png
+backend/tracked_routes_fixed.png
+
+# Node / Next.js / Frontend
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment & Secrets
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

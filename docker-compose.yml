@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aerosplit_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/flight_tracker.db:/app/flight_tracker.db
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${SERVER_API_URL:-http://localhost:8000}
+    container_name: aerosplit_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${SERVER_API_URL:-http://localhost:8000}
+    depends_on:
+      - backend
