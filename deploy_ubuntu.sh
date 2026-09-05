@@ -39,13 +39,26 @@ sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
 
 # 3. Build and launch containers
 echo "🔨 Building and launching containers with ${DOCKER_CMD}..."
-$DOCKER_CMD compose build --build-arg NEXT_PUBLIC_API_URL=${SERVER_API_URL}
-$DOCKER_CMD compose up -d
+if ! $DOCKER_CMD compose build --build-arg NEXT_PUBLIC_API_URL=${SERVER_API_URL}; then
+    echo "❌ Docker build failed. Please review the error log above."
+    exit 1
+fi
+
+if ! $DOCKER_CMD compose up -d; then
+    echo "❌ Failed to start containers. Please check Docker logs."
+    exit 1
+fi
 
 # 4. Verification
 echo ""
 echo "🔍 Checking container status:"
 $DOCKER_CMD compose ps
+
+RUNNING_COUNT=$($DOCKER_CMD compose ps --status running -q 2>/dev/null | wc -l)
+if [ "$RUNNING_COUNT" -eq 0 ]; then
+    echo "❌ Containers failed to start. View logs with: ${DOCKER_CMD} compose logs"
+    exit 1
+fi
 
 echo ""
 echo "=========================================================="
