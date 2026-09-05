@@ -1,16 +1,18 @@
 #!/bin/bash
 
-# Detect local IP address of Ubuntu Server
-SERVER_IP=$(hostname -I | awk '{print $1}')
+# Detect Public IP and Local IP
+PUBLIC_IP=$(curl -s4 --max-time 4 https://ifconfig.me 2>/dev/null || curl -s4 --max-time 4 https://api.ipify.org 2>/dev/null || echo "")
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP="${PUBLIC_IP:-$LOCAL_IP}"
 export SERVER_API_URL="http://${SERVER_IP}:8000"
 
 echo "🚀 Deploying AeroSplit AI on Ubuntu Server..."
-echo "📍 Server IP Detected: ${SERVER_IP}"
-echo "🔗 Frontend will connect to Backend API at: ${SERVER_API_URL}"
+echo "📍 Public IP Detected: ${PUBLIC_IP:-None (Local/Private only)}"
+echo "📍 Local/Internal IP:  ${LOCAL_IP}"
+echo "🔗 Connecting Backend API at: ${SERVER_API_URL}"
 
 # 1. Install Docker & Docker Compose if missing
-if ! command -v docker &> /dev/null
-then
+if ! command -v docker &> /dev/null; then
     echo "📦 Docker not found. Installing Docker and Docker Compose..."
     sudo apt-get update
     sudo apt-get install -y docker.io docker-compose-v2
@@ -18,20 +20,45 @@ then
     sudo usermod -aG docker $USER
 fi
 
-# 2. Open firewall ports (UFW)
+# Detect whether sudo is required for docker in current session
+DOCKER_CMD="docker"
+if ! docker info &> /dev/null; then
+    DOCKER_CMD="sudo docker"
+fi
+
+# 2. Open firewall ports (UFW & iptables)
 if command -v ufw &> /dev/null; then
-    echo "🛡️ Opening UFW firewall ports 3000 and 8000..."
+    echo "🛡️ Configuring UFW firewall ports 3000 and 8000..."
     sudo ufw allow 3000/tcp
     sudo ufw allow 8000/tcp
 fi
 
-# 3. Build and launch containers
-echo "🔨 Building and launching containers..."
-docker compose build --build-arg NEXT_PUBLIC_API_URL=${SERVER_API_URL} --no-cache
-docker compose up -d
+# Handle Oracle Cloud / RedHat style iptables rules if present
+sudo iptables -I INPUT 1 -p tcp --dport 3000 -j ACCEPT 2>/dev/null || true
+sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
 
+# 3. Build and launch containers
+echo "🔨 Building and launching containers with ${DOCKER_CMD}..."
+$DOCKER_CMD compose build --build-arg NEXT_PUBLIC_API_URL=${SERVER_API_URL}
+$DOCKER_CMD compose up -d
+
+# 4. Verification
+echo ""
+echo "🔍 Checking container status:"
+$DOCKER_CMD compose ps
+
+echo ""
 echo "=========================================================="
-echo "🎉 AeroSplit AI is live and accessible across your network!"
-echo "🌐 Access from any browser/desktop at:"
-echo "   http://${SERVER_IP}:3000"
+echo "🎉 AeroSplit AI is live!"
+if [ -n "$PUBLIC_IP" ]; then
+    echo "🌐 Access from your laptop/home browser at:"
+    echo "   👉 http://${PUBLIC_IP}:3000"
+fi
+echo "🏠 Access from same local network / private subnet at:"
+echo "   👉 http://${LOCAL_IP}:3000"
+echo "=========================================================="
+echo "⚠️ NOTE FOR CLOUD SERVERS (AWS EC2, Oracle Cloud, GCP, Azure, Linode):"
+echo "If the site still cannot be reached from your browser, you must"
+echo "open Port 3000 (TCP) and Port 8000 (TCP) in your Cloud Provider's"
+echo "Web Console under 'Security Groups' or 'Ingress Rules'!"
 echo "=========================================================="
