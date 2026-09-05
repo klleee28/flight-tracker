@@ -10,9 +10,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/flight_tracker.db:/app/flight_tracker.db
+      - backend_data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/flight_tracker.db
 
   frontend:
     build:
@@ -26,5 +27,9 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${SERVER_API_URL:-http://localhost:8000}
+      - INTERNAL_API_URL=http://backend:8000
     depends_on:
       - backend
+
+volumes:
+  backend_data:
