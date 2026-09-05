@@ -9,7 +9,7 @@ export SERVER_API_URL="http://${SERVER_IP}:8000"
 echo "🚀 Deploying AeroSplit AI on Ubuntu Server..."
 echo "📍 Public IP Detected: ${PUBLIC_IP:-None (Local/Private only)}"
 echo "📍 Local/Internal IP:  ${LOCAL_IP}"
-echo "🔗 Connecting Backend API at: ${SERVER_API_URL}"
+echo "🔗 Internal API Proxy: Transparent routing via Next.js (No CORS or NAT loopback issues)"
 
 # 1. Install Docker & Docker Compose if missing
 if ! command -v docker &> /dev/null; then
@@ -39,7 +39,7 @@ sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
 
 # 3. Build and launch containers
 echo "🔨 Building and launching containers with ${DOCKER_CMD}..."
-if ! $DOCKER_CMD compose build --build-arg NEXT_PUBLIC_API_URL=${SERVER_API_URL}; then
+if ! $DOCKER_CMD compose build; then
     echo "❌ Docker build failed. Please review the error log above."
     exit 1
 fi
@@ -64,14 +64,14 @@ echo ""
 echo "=========================================================="
 echo "🎉 AeroSplit AI is live!"
 if [ -n "$PUBLIC_IP" ]; then
-    echo "🌐 Access from your laptop/home browser at:"
+    echo "🌐 Access from outside network (Public IP):"
     echo "   👉 http://${PUBLIC_IP}:3000"
 fi
-echo "🏠 Access from same local network / private subnet at:"
+echo "🏠 Access from same local network / Wi-Fi (LAN IP):"
 echo "   👉 http://${LOCAL_IP}:3000"
+echo "⚡ Backend Swagger Docs / Direct API:"
+echo "   👉 http://${LOCAL_IP}:8000/docs"
 echo "=========================================================="
-echo "⚠️ NOTE FOR CLOUD SERVERS (AWS EC2, Oracle Cloud, GCP, Azure, Linode):"
-echo "If the site still cannot be reached from your browser, you must"
-echo "open Port 3000 (TCP) and Port 8000 (TCP) in your Cloud Provider's"
-echo "Web Console under 'Security Groups' or 'Ingress Rules'!"
+echo "💡 TIP: All API requests (/api/*) are automatically proxied"
+echo "   through Next.js on port 3000. It works everywhere seamlessly!"
 echo "=========================================================="

@@ -7,7 +7,7 @@ import HubGraphVisualizer from "@/components/HubGraphVisualizer";
 import TrackedRoutesList, { ScheduleStatus } from "@/components/TrackedRoutesList";
 import { SearchResponse, GreatDealItem, TrackedRouteItem } from "@/types/flight";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL !== undefined ? process.env.NEXT_PUBLIC_API_URL : "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
