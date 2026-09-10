@@ -3,7 +3,7 @@ import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -144,16 +144,31 @@ def update_schedule_config(req: SchedulerConfigRequest):
     return get_scheduler_status()
 
 @app.post("/api/scheduler/trigger-now")
-async def trigger_schedule_now():
+async def trigger_schedule_now(background_tasks: BackgroundTasks):
     """
     Triggers an immediate background price refresh for all active tracked routes.
+    Executed as an asynchronous background task to avoid HTTP gateway timeout.
     """
-    res = await async_daily_tracked_routes_scraper_job()
+    from services.scheduler import IS_REFRESHING_NOW
+    if IS_REFRESHING_NOW:
+        return {
+            "status": "in_progress",
+            "message": "Background price refresh is already currently running.",
+            "triggered_at": datetime.utcnow().isoformat() + "Z"
+        }
+
+    async def bg_worker():
+        try:
+            await async_daily_tracked_routes_scraper_job()
+        except Exception as e:
+            print(f"Background refresh worker notice: {e}")
+
+    background_tasks.add_task(bg_worker)
+
     return {
         "status": "success",
-        "message": f"Daily background refresh executed. Refreshed {res.get('routes_count', 0)} active routes ({res.get('records_count', 0)} authentic price records updated).",
-        "details": res,
-        "triggered_at": datetime.utcnow().isoformat()
+        "message": "Background price refresh triggered successfully. Scanning authentic rates in background...",
+        "triggered_at": datetime.utcnow().isoformat() + "Z"
     }
 
 @app.get("/api/tracked-routes")
@@ -175,10 +190,13 @@ async def get_tracked_routes(refresh: bool = False, db: Session = Depends(get_db
                 # Ensure last_scraped_at is included in response
                 last_dt = r.last_scraped_at or (r.created_at if not cached.get("last_scraped_at") else None)
                 if last_dt:
-                    iso = last_dt.isoformat()
+                    if hasattr(last_dt, "isoformat"):
+                        iso = last_dt.isoformat()
+                    else:
+                        iso = str(last_dt).replace(" ", "T")
                     cached["last_scraped_at"] = iso if iso.endswith("Z") else iso + "Z"
                 elif cached.get("last_scraped_at"):
-                    cur_iso = str(cached["last_scraped_at"])
+                    cur_iso = str(cached["last_scraped_at"]).replace(" ", "T")
                     cached["last_scraped_at"] = cur_iso if cur_iso.endswith("Z") else cur_iso + "Z"
                 else:
                     cached["last_scraped_at"] = None

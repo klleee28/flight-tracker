@@ -187,11 +187,26 @@ export default function Home() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || errData.message || `Server error (${res.status}): ${res.statusText}`);
       }
+      // Re-fetch immediately to update scheduleStatus state
       await Promise.all([
         fetchTrackedRoutes(),
         fetchGreatDeals(),
         fetchScheduleStatus(),
       ]);
+
+      // Poll every 3 seconds for 21 seconds as background scraper completes routes
+      let pollCount = 0;
+      const pollTimer = setInterval(async () => {
+        pollCount++;
+        await Promise.all([
+          fetchTrackedRoutes(),
+          fetchScheduleStatus(),
+        ]);
+        if (pollCount >= 7) {
+          clearInterval(pollTimer);
+          fetchGreatDeals();
+        }
+      }, 3000);
     } catch (err: any) {
       console.error("Trigger daily refresh error:", err);
       throw err;

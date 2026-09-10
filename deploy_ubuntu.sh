@@ -38,14 +38,9 @@ sudo iptables -I INPUT 1 -p tcp --dport 3000 -j ACCEPT 2>/dev/null || true
 sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
 
 # 3. Build and launch containers
-echo "🔨 Building and launching containers with ${DOCKER_CMD}..."
-if ! $DOCKER_CMD compose build; then
-    echo "❌ Docker build failed. Please review the error log above."
-    exit 1
-fi
-
-if ! $DOCKER_CMD compose up -d; then
-    echo "❌ Failed to start containers. Please check Docker logs."
+echo "🔨 Building and launching containers with ${DOCKER_CMD} (clean build & recreate)..."
+if ! $DOCKER_CMD compose up -d --build --force-recreate; then
+    echo "❌ Docker build or launch failed. Please review the error log above."
     exit 1
 fi
 

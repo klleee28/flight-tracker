@@ -26,6 +26,7 @@ DEFAULT_DAILY_HOUR = 2
 DEFAULT_DAILY_MINUTE = 0
 CURRENT_DAILY_TIME = "02:00"
 LAST_RUN_TIMESTAMP: Optional[str] = None
+IS_REFRESHING_NOW: bool = False
 
 def get_segment_distance(code1: str, code2: str) -> float:
     a1 = get_airport_info(code1)
@@ -528,13 +529,14 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
     Async implementation of daily background scraper job.
     Scrapes and updates authentic price history records and cached flight data for all active tracked routes.
     """
-    global LAST_RUN_TIMESTAMP
+    global LAST_RUN_TIMESTAMP, IS_REFRESHING_NOW
     db = SessionLocal()
     refreshed_routes = []
 
     try:
+        IS_REFRESHING_NOW = True
         now = datetime.utcnow()
-        LAST_RUN_TIMESTAMP = now.isoformat()
+        LAST_RUN_TIMESTAMP = now.isoformat() + "Z"
         
         active_routes = db.query(TrackedRoute).filter(TrackedRoute.is_active == True).all()
         for r in active_routes:
@@ -548,7 +550,15 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
         return {
             "routes_count": len(refreshed_routes),
             "timestamp": LAST_RUN_TIMESTAMP,
-            "routes": [{"id": r["id"], "origin": r["origin"]["code"], "destination": r["destination"]["code"], "price": r["estimated_price"]} for r in refreshed_routes]
+            "routes": [
+                {
+                    "id": r.get("id"),
+                    "origin": r["origin"]["code"] if isinstance(r.get("origin"), dict) else r.get("origin", "N/A"),
+                    "destination": r["destination"]["code"] if isinstance(r.get("destination"), dict) else r.get("destination", "N/A"),
+                    "price": r.get("estimated_price", 0.0)
+                }
+                for r in refreshed_routes
+            ]
         }
     except Exception as e:
         print(f"APScheduler daily job error: {e}")
@@ -558,6 +568,7 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
             "timestamp": LAST_RUN_TIMESTAMP
         }
     finally:
+        IS_REFRESHING_NOW = False
         db.close()
 
 def daily_tracked_routes_scraper_job():
@@ -613,11 +624,22 @@ def stop_scheduler():
         print("APScheduler stopped.")
 
 def get_scheduler_status() -> Dict[str, Any]:
+    global LAST_RUN_TIMESTAMP, IS_REFRESHING_NOW
     db = SessionLocal()
     try:
         active_count = db.query(TrackedRoute).filter(TrackedRoute.is_active == True).count()
+        most_recent = db.query(TrackedRoute.last_scraped_at).filter(
+            TrackedRoute.is_active == True,
+            TrackedRoute.last_scraped_at.isnot(None)
+        ).order_by(TrackedRoute.last_scraped_at.desc()).first()
     finally:
         db.close()
+
+    last_dt = LAST_RUN_TIMESTAMP
+    if not last_dt and most_recent and most_recent[0]:
+        dt_val = most_recent[0]
+        iso = dt_val.isoformat() if hasattr(dt_val, "isoformat") else str(dt_val).replace(" ", "T")
+        last_dt = iso if iso.endswith("Z") else iso + "Z"
 
     job = scheduler.get_job('daily_flight_scraper_cron') if scheduler.running else None
     next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
@@ -628,6 +650,7 @@ def get_scheduler_status() -> Dict[str, Any]:
         "daily_time": CURRENT_DAILY_TIME,
         "cron_expression": f"{DEFAULT_DAILY_MINUTE} {DEFAULT_DAILY_HOUR} * * * (Daily at {CURRENT_DAILY_TIME} UTC)",
         "next_run_at": next_run,
-        "last_run_at": LAST_RUN_TIMESTAMP,
-        "tracked_routes_count": active_count
+        "last_run_at": last_dt,
+        "tracked_routes_count": active_count,
+        "is_refreshing": IS_REFRESHING_NOW
     }

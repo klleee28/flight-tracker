@@ -59,6 +59,7 @@ export interface ScheduleStatus {
   next_run_at?: string | null;
   last_run_at?: string | null;
   tracked_routes_count: number;
+  is_refreshing?: boolean;
 }
 
 interface Props {
@@ -249,12 +250,25 @@ export default function TrackedRoutesList({
                 ACTIVE @ {scheduleStatus?.daily_time || "02:00"} UTC
               </span>
             </div>
-            <div className="text-slate-400 font-mono text-[11px] mt-0.5">
-              Refreshes prices for all {routes.length} active routes daily at <strong className="text-cyan-300">{scheduleStatus?.daily_time || "02:00"} AM UTC</strong>.
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-400 font-mono text-[11px] mt-1">
+              <span>
+                Refreshes prices for {routes.length} active routes daily at <strong className="text-cyan-300">{scheduleStatus?.daily_time || "02:00"} UTC</strong>
+              </span>
+              <span className="text-slate-600">•</span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${scheduleStatus?.last_run_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+                <span className="text-slate-400 font-medium">Last Refreshed:</span>
+                <strong suppressHydrationWarning className="text-emerald-300 font-bold">
+                  {fmtLastRefreshed(scheduleStatus?.last_run_at)}
+                </strong>
+              </span>
               {scheduleStatus?.next_run_at && (
-                <span className="text-emerald-400 ml-2 font-semibold">
-                  (Next Run: {new Date(scheduleStatus.next_run_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })})
-                </span>
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-cyan-300">
+                    Next Run: {new Date(scheduleStatus.next_run_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </>
               )}
             </div>
           </div>
@@ -651,13 +665,22 @@ export default function TrackedRoutesList({
                 </div>
 
                 {/* Range Period Banner */}
-                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 text-sm font-mono space-y-1 mb-3.5">
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 text-sm font-mono space-y-1.5 mb-3.5">
                   <div className="flex justify-between text-slate-300">
                     <span className="text-xs text-cyan-300 font-extrabold">📅 Active Window:</span>
                     <span className="text-xs text-slate-300 font-bold">{route.trip_duration_days} Days</span>
                   </div>
                   <div className="text-xs text-white font-black">
                     {route.range_start} ➔ {route.range_end}
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1.5 border-t border-slate-800/80">
+                    <span className="flex items-center gap-1.5 text-slate-400">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${route.last_scraped_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+                      <span>Data Refreshed:</span>
+                    </span>
+                    <span suppressHydrationWarning className="text-emerald-300 font-bold">
+                      {fmtLastRefreshed(route.last_scraped_at)}
+                    </span>
                   </div>
                 </div>
 
