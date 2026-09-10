@@ -1,17 +1,45 @@
 #!/bin/bash
 
-# Detect Public IP and Local IP
+# Ensure script runs from the repository root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "=========================================================="
+echo "🚀 AeroSplit AI - Automated Ubuntu Deployment Engine"
+echo "=========================================================="
+
+# 1. Pull latest updates automatically from GitHub
+if command -v git &> /dev/null && [ -d ".git" ]; then
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    echo "📥 Checking and pulling latest code from GitHub (branch: ${BRANCH})..."
+    
+    # Stash any untracked or permission changes so git pull always succeeds cleanly
+    git stash 2>/dev/null || true
+    
+    if git pull origin "$BRANCH"; then
+        echo "✅ Successfully updated to latest commit: $(git rev-parse --short HEAD)"
+        echo "   Commit message: $(git log -1 --pretty=%B | head -n 1)"
+    else
+        echo "⚠️ git pull encountered an issue. Continuing with current local files."
+    fi
+    chmod +x deploy_ubuntu.sh 2>/dev/null || true
+else
+    echo "ℹ️ Not a git repository or git command missing. Skipping git pull."
+fi
+
+echo ""
+
+# 2. Detect Public IP and Local IP
 PUBLIC_IP=$(curl -s4 --max-time 4 https://ifconfig.me 2>/dev/null || curl -s4 --max-time 4 https://api.ipify.org 2>/dev/null || echo "")
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 SERVER_IP="${PUBLIC_IP:-$LOCAL_IP}"
 export SERVER_API_URL="http://${SERVER_IP}:8000"
 
-echo "🚀 Deploying AeroSplit AI on Ubuntu Server..."
 echo "📍 Public IP Detected: ${PUBLIC_IP:-None (Local/Private only)}"
 echo "📍 Local/Internal IP:  ${LOCAL_IP}"
 echo "🔗 Internal API Proxy: Transparent routing via Next.js (No CORS or NAT loopback issues)"
 
-# 1. Install Docker & Docker Compose if missing
+# 3. Install Docker & Docker Compose if missing
 if ! command -v docker &> /dev/null; then
     echo "📦 Docker not found. Installing Docker and Docker Compose..."
     sudo apt-get update
@@ -26,7 +54,7 @@ if ! docker info &> /dev/null; then
     DOCKER_CMD="sudo docker"
 fi
 
-# 2. Open firewall ports (UFW & iptables)
+# 4. Open firewall ports (UFW & iptables)
 if command -v ufw &> /dev/null; then
     echo "🛡️ Configuring UFW firewall ports 3000 and 8000..."
     sudo ufw allow 3000/tcp
@@ -37,7 +65,7 @@ fi
 sudo iptables -I INPUT 1 -p tcp --dport 3000 -j ACCEPT 2>/dev/null || true
 sudo iptables -I INPUT 1 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
 
-# 3. Build and launch containers
+# 5. Build and launch containers
 echo "🔨 Building and launching containers with ${DOCKER_CMD} (clean build & recreate)..."
 if ! $DOCKER_CMD compose up -d --build --force-recreate; then
     echo "❌ Docker build or launch failed. Please review the error log above."
