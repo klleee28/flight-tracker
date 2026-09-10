@@ -21,6 +21,36 @@ function fmtDate(dateStr?: string | null, fallback: string = "N/A"): string {
   }
 }
 
+function fmtLastRefreshed(dateStr?: string | null): string {
+  if (!dateStr || dateStr.trim() === "") return "Pending initial scan";
+  try {
+    const normalized = dateStr.includes("T")
+      ? (dateStr.endsWith("Z") ? dateStr : dateStr + "Z")
+      : dateStr.replace(" ", "T") + "Z";
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) {
+      const d2 = new Date(dateStr);
+      if (isNaN(d2.getTime())) return dateStr;
+      return d2.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 export interface ScheduleStatus {
   status: string;
   schedule_type: string;
@@ -798,6 +828,17 @@ export default function TrackedRoutesList({
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono">
                     60d Avg: S${route.avg_60d ? route.avg_60d.toFixed(0) : "N/A"}
+                  </span>
+                </div>
+
+                {/* Last Refreshed Date Banner */}
+                <div className="flex items-center justify-between text-[11px] font-mono px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800/80 text-slate-400 mt-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${route.last_scraped_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+                    <span className="text-slate-400 font-medium">Last Refreshed:</span>
+                  </div>
+                  <span suppressHydrationWarning className="text-slate-200 font-bold">
+                    {mounted ? fmtLastRefreshed(route.last_scraped_at) : (route.last_scraped_at ? "Loading..." : "Pending initial scan")}
                   </span>
                 </div>
               </div>

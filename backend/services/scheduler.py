@@ -510,6 +510,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         "status": status,
         "status_message": status_message,
         "is_active": r.is_active,
+        "last_scraped_at": now.isoformat() + "Z",
         "created_at": r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat()
     }
 

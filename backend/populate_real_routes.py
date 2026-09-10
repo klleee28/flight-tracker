@@ -173,6 +173,7 @@ async def scrape_route(r, db):
         'return_leg1': return_leg1_detail,
         'return_leg2': return_leg2_detail,
         'is_active': r.is_active,
+        'last_scraped_at': now.isoformat() + 'Z',
         'created_at': r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat()
     }
 

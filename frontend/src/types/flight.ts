@@ -159,5 +159,6 @@ export interface TrackedRouteItem {
   status?: string;
   status_message?: string;
   is_active: boolean;
+  last_scraped_at?: string | null;
   created_at: string;
 }

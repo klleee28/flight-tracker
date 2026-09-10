@@ -172,6 +172,16 @@ async def get_tracked_routes(refresh: bool = False, db: Session = Depends(get_db
                 deal_info = evaluate_deal_score(est_price, stats["avg_60d"], stats["avg_30d"])
                 cached["avg_60d"] = stats["avg_60d"]
                 cached["deal_info"] = deal_info
+                # Ensure last_scraped_at is included in response
+                last_dt = r.last_scraped_at or (r.created_at if not cached.get("last_scraped_at") else None)
+                if last_dt:
+                    iso = last_dt.isoformat()
+                    cached["last_scraped_at"] = iso if iso.endswith("Z") else iso + "Z"
+                elif cached.get("last_scraped_at"):
+                    cur_iso = str(cached["last_scraped_at"])
+                    cached["last_scraped_at"] = cur_iso if cur_iso.endswith("Z") else cur_iso + "Z"
+                else:
+                    cached["last_scraped_at"] = None
                 return cached
             except Exception as e:
                 print(f"Notice: cached data parse error for route {r.id}: {e}")
