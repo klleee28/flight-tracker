@@ -327,7 +327,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
                     currency="SGD", is_direct=True, scraped_at=now
                 ))
 
-        elif is_ob_direct:
+        if cand_ob_price == 0 and is_ob_direct:
             ob_data = await fetch_route_price(r.origin, r.destination, outbound_date, allow_live_browser=True)
             if ob_data.get("is_available") and ob_data.get("price", 0) > 0:
                 cand_ob_price = round(ob_data["price"], 2)
@@ -497,6 +497,19 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         else:
             status_message = f"Live one-way flight verified departing {dep_date_used}."
     else:
+        # If scraper timed out or had temporary network failure, preserve valid existing cached flight data
+        if r.cached_flight_data:
+            try:
+                prev_cache = json.loads(r.cached_flight_data)
+                if prev_cache.get("status") == "available" and prev_cache.get("estimated_price", 0) > 0:
+                    prev_cache["last_scraped_at"] = now.isoformat()
+                    r.cached_flight_data = json.dumps(prev_cache)
+                    r.last_scraped_at = now
+                    db.commit()
+                    return prev_cache
+            except Exception:
+                pass
+
         status = "no_route_in_range"
         estimated_price = 0.0
         outbound_legs = []
@@ -569,23 +582,38 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
     Scrapes and updates authentic price history records and cached flight data for all active tracked routes.
     """
     global LAST_RUN_TIMESTAMP, IS_REFRESHING_NOW
-    db = SessionLocal()
     refreshed_routes = []
 
     try:
         IS_REFRESHING_NOW = True
-        now = datetime.now(KL_TZ)
-        LAST_RUN_TIMESTAMP = now.isoformat()
-        
-        active_routes = db.query(TrackedRoute).filter(TrackedRoute.is_active == True).all()
-        for r in active_routes:
-            try:
-                res = await refresh_tracked_route_data(r, db)
-                refreshed_routes.append(res)
-            except Exception as route_err:
-                print(f"Error refreshing route {r.id} ({r.origin}->{r.destination}): {route_err}")
 
-        print(f"[{now.isoformat()}] APScheduler Daily Cron: Refreshed authentic price data for {len(refreshed_routes)} tracked routes.")
+        # Query active route IDs using a quick, isolated session
+        temp_db = SessionLocal()
+        try:
+            active_ids = [r.id for r in temp_db.query(TrackedRoute.id).filter(TrackedRoute.is_active == True).all()]
+        finally:
+            temp_db.close()
+
+        start_time_iso = datetime.now(KL_TZ).isoformat()
+        print(f"[{start_time_iso}] APScheduler Daily Cron: Starting live price refresh for {len(active_ids)} active routes...")
+
+        for r_id in active_ids:
+            route_db = SessionLocal()
+            try:
+                route_obj = route_db.query(TrackedRoute).filter(TrackedRoute.id == r_id, TrackedRoute.is_active == True).first()
+                if route_obj:
+                    res = await refresh_tracked_route_data(route_obj, route_db)
+                    refreshed_routes.append(res)
+                    print(f"  [Refreshed] Route {r_id} ({route_obj.origin}->{route_obj.destination}): S${res.get('estimated_price', 0)}")
+            except Exception as route_err:
+                print(f"Error refreshing route {r_id}: {route_err}")
+            finally:
+                route_db.close()
+
+        completion_now = datetime.now(KL_TZ)
+        LAST_RUN_TIMESTAMP = completion_now.isoformat()
+
+        print(f"[{completion_now.isoformat()}] APScheduler Daily Cron: Finished refreshing {len(refreshed_routes)} of {len(active_ids)} tracked routes.")
         return {
             "routes_count": len(refreshed_routes),
             "timestamp": LAST_RUN_TIMESTAMP,
@@ -608,7 +636,6 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
         }
     finally:
         IS_REFRESHING_NOW = False
-        db.close()
 
 def daily_tracked_routes_scraper_job():
     """Sync wrapper for APScheduler background cron execution."""

@@ -65,6 +65,30 @@ export default function Home() {
     }
   };
 
+  // Keep polling if scheduler is running in background (e.g. from page reload, cron, or trigger)
+  useEffect(() => {
+    if (!scheduleStatus?.is_refreshing) return;
+    const interval = setInterval(async () => {
+      try {
+        const statusRes = await fetch(`${API_BASE_URL}/api/scheduler/status`);
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          setScheduleStatus(status);
+          if (!status.is_refreshing) {
+            clearInterval(interval);
+            await Promise.all([fetchTrackedRoutes(), fetchGreatDeals()]);
+          } else {
+            await fetchTrackedRoutes();
+          }
+        }
+      } catch (err) {
+        console.error("Auto polling error:", err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [scheduleStatus?.is_refreshing]);
+
   const handleSearch = async (
     origin: string,
     destination: string,
@@ -178,6 +202,23 @@ export default function Home() {
     }
   };
 
+  const handleRefreshSingleRoute = async (id: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tracked-routes/${id}/refresh`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await Promise.all([
+          fetchTrackedRoutes(),
+          fetchScheduleStatus(),
+          fetchGreatDeals(),
+        ]);
+      }
+    } catch (err) {
+      console.error("Single route refresh error:", err);
+    }
+  };
+
   const handleTriggerDailyRefreshNow = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/scheduler/trigger-now`, {
@@ -187,26 +228,46 @@ export default function Home() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || errData.message || `Server error (${res.status}): ${res.statusText}`);
       }
-      // Re-fetch immediately to update scheduleStatus state
+
+      // Initial re-fetch to show in-progress state immediately
       await Promise.all([
-        fetchTrackedRoutes(),
-        fetchGreatDeals(),
         fetchScheduleStatus(),
+        fetchTrackedRoutes(),
       ]);
 
-      // Poll every 3 seconds for 21 seconds as background scraper completes routes
-      let pollCount = 0;
-      const pollTimer = setInterval(async () => {
-        pollCount++;
-        await Promise.all([
-          fetchTrackedRoutes(),
-          fetchScheduleStatus(),
-        ]);
-        if (pollCount >= 7) {
-          clearInterval(pollTimer);
-          fetchGreatDeals();
-        }
-      }, 3000);
+      // Smart polling: Poll every 2.5 seconds until background scraper finishes
+      const startTime = Date.now();
+      const maxPollTimeMs = 180000; // 3 minutes max
+
+      return new Promise<void>((resolve) => {
+        const pollTimer = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`${API_BASE_URL}/api/scheduler/status`);
+            let stillRefreshing = false;
+            if (statusRes.ok) {
+              const status = await statusRes.json();
+              setScheduleStatus(status);
+              stillRefreshing = Boolean(status.is_refreshing);
+            }
+
+            // Also fetch routes so cards update live as each route completes!
+            await fetchTrackedRoutes();
+
+            const elapsed = Date.now() - startTime;
+            if (!stillRefreshing || elapsed >= maxPollTimeMs) {
+              clearInterval(pollTimer);
+              await Promise.all([
+                fetchTrackedRoutes(),
+                fetchGreatDeals(),
+                fetchScheduleStatus(),
+              ]);
+              resolve();
+            }
+          } catch (pollErr) {
+            console.error("Polling error:", pollErr);
+          }
+        }, 2500);
+      });
     } catch (err: any) {
       console.error("Trigger daily refresh error:", err);
       throw err;
@@ -300,6 +361,7 @@ export default function Home() {
           onSelectRoute={handleSearch}
           onAddRoute={handleAddTrackedRoute}
           onDeleteRoute={handleDeleteTrackedRoute}
+          onRefreshSingleRoute={handleRefreshSingleRoute}
           onTriggerRefreshNow={handleTriggerDailyRefreshNow}
           onChangeDailyTime={handleChangeDailyTime}
           isLoading={isLoading}

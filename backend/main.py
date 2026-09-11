@@ -151,19 +151,24 @@ async def trigger_schedule_now(background_tasks: BackgroundTasks):
     Triggers an immediate background price refresh for all active tracked routes.
     Executed as an asynchronous background task to avoid HTTP gateway timeout.
     """
-    from services.scheduler import IS_REFRESHING_NOW
-    if IS_REFRESHING_NOW:
+    import services.scheduler as sched
+    if sched.IS_REFRESHING_NOW:
         return {
             "status": "in_progress",
             "message": "Background price refresh is already currently running.",
             "triggered_at": datetime.now(KL_TZ).isoformat()
         }
 
+    # Set IS_REFRESHING_NOW immediately to prevent race conditions on frontend poll
+    sched.IS_REFRESHING_NOW = True
+
     async def bg_worker():
         try:
             await async_daily_tracked_routes_scraper_job()
         except Exception as e:
             print(f"Background refresh worker notice: {e}")
+        finally:
+            sched.IS_REFRESHING_NOW = False
 
     background_tasks.add_task(bg_worker)
 
@@ -257,6 +262,20 @@ def delete_tracked_route(route_id: int, db: Session = Depends(get_db)):
     route.is_active = False
     db.commit()
     return {"status": "deleted", "id": route_id}
+
+@app.post("/api/tracked-routes/{route_id}/refresh")
+async def refresh_single_route(route_id: int, db: Session = Depends(get_db)):
+    """
+    On-demand live price refresh for an individual tracked route.
+    Scrapes authentic rates directly from Google Flights and updates database cache.
+    """
+    route = db.query(TrackedRoute).filter(TrackedRoute.id == route_id, TrackedRoute.is_active == True).first()
+    if not route:
+        raise HTTPException(status_code=404, detail="Active tracked route not found.")
+    
+    from services.scheduler import refresh_tracked_route_data
+    route_dict = await refresh_tracked_route_data(route, db)
+    return route_dict
 
 async def build_route_options(origin: str, destination: str, travel_date: str, db: Session):
     from services.scraper import parse_time_to_minutes

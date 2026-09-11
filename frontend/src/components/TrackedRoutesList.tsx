@@ -78,6 +78,7 @@ interface Props {
     tripType: string
   ) => Promise<any>;
   onDeleteRoute: (id: number) => Promise<void>;
+  onRefreshSingleRoute?: (id: number) => Promise<void>;
   onTriggerRefreshNow?: () => Promise<void>;
   onChangeDailyTime?: (timeStr: string) => Promise<void>;
   isLoading?: boolean;
@@ -89,6 +90,7 @@ export default function TrackedRoutesList({
   onSelectRoute,
   onAddRoute,
   onDeleteRoute,
+  onRefreshSingleRoute,
   onTriggerRefreshNow,
   onChangeDailyTime,
   isLoading = false,
@@ -124,11 +126,49 @@ export default function TrackedRoutesList({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshingRouteIds, setRefreshingRouteIds] = useState<Record<number, boolean>>({});
   const [refreshFeedback, setRefreshFeedback] = useState<{ type: "success" | "error" | "loading"; message: string } | null>(null);
+
+  const isCurrentlyRefreshing = isRefreshing || Boolean(scheduleStatus?.is_refreshing);
+
+  const handleSingleRouteRefresh = async (routeId: number) => {
+    if (!onRefreshSingleRoute || refreshingRouteIds[routeId] || isCurrentlyRefreshing) return;
+    setRefreshingRouteIds((prev) => ({ ...prev, [routeId]: true }));
+    try {
+      await onRefreshSingleRoute(routeId);
+    } catch (err: any) {
+      console.error(`Route ${routeId} refresh error:`, err);
+    } finally {
+      setRefreshingRouteIds((prev) => ({ ...prev, [routeId]: false }));
+    }
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOrigin || !newDestination) return;
+
+    if (newOrigin.trim() === newDestination.trim()) {
+      setSubmitError("Origin and Destination airports must be different.");
+      return;
+    }
+
+    if (newRangeStart >= newRangeEnd) {
+      setSubmitError("Range End date must be after Range Start date.");
+      return;
+    }
+
+    if (newTripType === "round_trip") {
+      const startMs = new Date(newRangeStart).getTime();
+      const endMs = new Date(newRangeEnd).getTime();
+      const diffDays = Math.round((endMs - startMs) / (1000 * 3600 * 24));
+      if (newDuration > diffDays) {
+        setSubmitError(
+          `Trip duration (${newDuration} days) exceeds the date window (${diffDays} days). Please widen the date window or reduce trip duration.`
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     try {
@@ -255,7 +295,7 @@ export default function TrackedRoutesList({
                 <span className={`w-2 h-2 rounded-full shrink-0 ${scheduleStatus?.last_run_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
                 <span className="text-slate-400 font-medium">Last Refreshed:</span>
                 <strong suppressHydrationWarning className="text-emerald-300 font-bold">
-                  {fmtLastRefreshed(scheduleStatus?.last_run_at)}
+                  {mounted ? fmtLastRefreshed(scheduleStatus?.last_run_at) : (scheduleStatus?.last_run_at ? "Loading..." : "Pending initial scan")}
                 </strong>
               </span>
               {scheduleStatus?.next_run_at && (
@@ -274,10 +314,10 @@ export default function TrackedRoutesList({
           <button
             type="button"
             onClick={handleTriggerRefresh}
-            disabled={isRefreshing}
+            disabled={isCurrentlyRefreshing}
             className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:opacity-60 flex items-center gap-2 active:scale-95"
           >
-            {isRefreshing ? (
+            {isCurrentlyRefreshing ? (
               <>
                 <span className="w-3 h-3 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
                 <span>Refreshing Routes...</span>
@@ -675,7 +715,7 @@ export default function TrackedRoutesList({
                       <span>Data Refreshed:</span>
                     </span>
                     <span suppressHydrationWarning className="text-emerald-300 font-bold">
-                      {fmtLastRefreshed(route.last_scraped_at)}
+                      {mounted ? fmtLastRefreshed(route.last_scraped_at) : (route.last_scraped_at ? "Loading..." : "Pending initial scan")}
                     </span>
                   </div>
                 </div>
@@ -849,24 +889,13 @@ export default function TrackedRoutesList({
                     60d Avg: S${route.avg_60d ? route.avg_60d.toFixed(0) : "N/A"}
                   </span>
                 </div>
-
-                {/* Last Refreshed Date Banner */}
-                <div className="flex items-center justify-between text-[11px] font-mono px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800/80 text-slate-400 mt-2.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${route.last_scraped_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
-                    <span className="text-slate-400 font-medium">Last Refreshed:</span>
-                  </div>
-                  <span suppressHydrationWarning className="text-slate-200 font-bold">
-                    {mounted ? fmtLastRefreshed(route.last_scraped_at) : (route.last_scraped_at ? "Loading..." : "Pending initial scan")}
-                  </span>
-                </div>
               </div>
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
-                  disabled={isLoading}
+                  disabled={isLoading || isCurrentlyRefreshing}
                   onClick={() =>
                     onSelectRoute(
                       route.origin.code,
@@ -877,10 +906,26 @@ export default function TrackedRoutesList({
                       route.trip_type
                     )
                   }
-                  className="flex-1 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-extrabold rounded-lg transition-all shadow-md flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                  className="flex-1 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-extrabold rounded-lg transition-all shadow-md flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 active:scale-95"
                 >
                   <span>{isNoRouteFound ? "⚡ Re-Scan Range" : "⚡ Scan Route"}</span>
                 </button>
+
+                {onRefreshSingleRoute && (
+                  <button
+                    type="button"
+                    disabled={Boolean(refreshingRouteIds[route.id]) || isCurrentlyRefreshing || isLoading}
+                    onClick={() => handleSingleRouteRefresh(route.id)}
+                    title="Refresh authentic prices for this route now"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 hover:border-cyan-500/50 text-cyan-300 border border-slate-700/60 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 active:scale-95 shrink-0"
+                  >
+                    <span className={refreshingRouteIds[route.id] ? "inline-block animate-spin" : "inline-block"}>
+                      🔄
+                    </span>
+                    <span>{refreshingRouteIds[route.id] ? "Updating..." : "Refresh"}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => onDeleteRoute(route.id)}
