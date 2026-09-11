@@ -12,6 +12,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_PATH=/app/data/flight_tracker.db
+      - TZ=Asia/Kuala_Lumpur
 
   frontend:
     build:
@@ -23,6 +24,7 @@ services:
       - "3000:3000"
     environment:
       - INTERNAL_API_URL=http://backend:8000
+      - TZ=Asia/Kuala_Lumpur
     depends_on:
       - backend
 

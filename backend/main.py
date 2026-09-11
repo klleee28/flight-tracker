@@ -22,7 +22,9 @@ from services.scheduler import (
     configure_daily_schedule,
     daily_tracked_routes_scraper_job,
     async_daily_tracked_routes_scraper_job,
-    refresh_tracked_route_data
+    refresh_tracked_route_data,
+    format_kl_iso,
+    KL_TZ
 )
 from services.scraper import LCC_AIRLINES, build_platform_price_breakdown
 
@@ -63,8 +65,8 @@ def on_startup():
         
         existing_tracked = db.query(TrackedRoute).count()
         if existing_tracked == 0:
-            d_start = (datetime.utcnow() + timedelta(days=20)).strftime("%Y-%m-%d")
-            d_end = (datetime.utcnow() + timedelta(days=27)).strftime("%Y-%m-%d")
+            d_start = (datetime.now(KL_TZ) + timedelta(days=20)).strftime("%Y-%m-%d")
+            d_end = (datetime.now(KL_TZ) + timedelta(days=27)).strftime("%Y-%m-%d")
             default_routes = [
                 {"origin": "BWN", "destination": "TWU", "range_start": d_start, "range_end": d_end, "trip_duration_days": 7, "trip_type": "round_trip"},
                 {"origin": "BWN", "destination": "KUL", "range_start": d_start, "range_end": d_end, "trip_duration_days": 7, "trip_type": "round_trip"},
@@ -117,7 +119,7 @@ def read_root():
         "status": "online",
         "service": "AeroSplit AI Backend",
         "hubs_tracked": len(ASIAN_HUBS),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(KL_TZ).isoformat()
     }
 
 @app.get("/api/hubs")
@@ -154,7 +156,7 @@ async def trigger_schedule_now(background_tasks: BackgroundTasks):
         return {
             "status": "in_progress",
             "message": "Background price refresh is already currently running.",
-            "triggered_at": datetime.utcnow().isoformat() + "Z"
+            "triggered_at": datetime.now(KL_TZ).isoformat()
         }
 
     async def bg_worker():
@@ -168,7 +170,7 @@ async def trigger_schedule_now(background_tasks: BackgroundTasks):
     return {
         "status": "success",
         "message": "Background price refresh triggered successfully. Scanning authentic rates in background...",
-        "triggered_at": datetime.utcnow().isoformat() + "Z"
+        "triggered_at": datetime.now(KL_TZ).isoformat()
     }
 
 @app.get("/api/tracked-routes")
@@ -187,19 +189,11 @@ async def get_tracked_routes(refresh: bool = False, db: Session = Depends(get_db
                 deal_info = evaluate_deal_score(est_price, stats["avg_60d"], stats["avg_30d"])
                 cached["avg_60d"] = stats["avg_60d"]
                 cached["deal_info"] = deal_info
-                # Ensure last_scraped_at is included in response
+                # Ensure last_scraped_at and created_at are formatted in KL timezone (+08:00)
                 last_dt = r.last_scraped_at or (r.created_at if not cached.get("last_scraped_at") else None)
-                if last_dt:
-                    if hasattr(last_dt, "isoformat"):
-                        iso = last_dt.isoformat()
-                    else:
-                        iso = str(last_dt).replace(" ", "T")
-                    cached["last_scraped_at"] = iso if iso.endswith("Z") else iso + "Z"
-                elif cached.get("last_scraped_at"):
-                    cur_iso = str(cached["last_scraped_at"]).replace(" ", "T")
-                    cached["last_scraped_at"] = cur_iso if cur_iso.endswith("Z") else cur_iso + "Z"
-                else:
-                    cached["last_scraped_at"] = None
+                cached["last_scraped_at"] = format_kl_iso(last_dt) if last_dt else format_kl_iso(cached.get("last_scraped_at"))
+                if r.created_at:
+                    cached["created_at"] = format_kl_iso(r.created_at)
                 return cached
             except Exception as e:
                 print(f"Notice: cached data parse error for route {r.id}: {e}")
@@ -580,7 +574,7 @@ async def search_flight_routes(
             "combined_deal_info": combined_deal_info,
             "range_analysis": range_analysis,
             "scraper_status": scraper_status,
-            "search_timestamp": datetime.utcnow().isoformat()
+            "search_timestamp": datetime.now(KL_TZ).isoformat()
         }
     except asyncio.CancelledError:
         print("Search task cancelled cleanly on client disconnect.")

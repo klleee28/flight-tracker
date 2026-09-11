@@ -1,5 +1,8 @@
 FROM node:20-alpine AS builder
 
+RUN apk add --no-cache tzdata
+ENV TZ="Asia/Kuala_Lumpur"
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -16,6 +19,8 @@ ENV INTERNAL_API_URL=${INTERNAL_API_URL}
 RUN npm run build
 
 FROM node:20-alpine AS runner
+RUN apk add --no-cache tzdata
+ENV TZ="Asia/Kuala_Lumpur"
 WORKDIR /app
 
 ENV NODE_ENV=production

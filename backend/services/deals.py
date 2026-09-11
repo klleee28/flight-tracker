@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
+import zoneinfo
 import random
 from typing import Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models import PriceHistory
 from services.scraper import generate_realistic_flight_price
+
+KL_TZ = zoneinfo.ZoneInfo("Asia/Kuala_Lumpur")
 
 def seed_historical_baseline_data(db: Session, origin: str, destination: str, distance_km: float = 1200.0) -> float:
     """
@@ -24,7 +27,7 @@ def calculate_route_statistics(db: Session, origin: str, destination: str, dista
     if key in _STATS_CACHE:
         return _STATS_CACHE[key]
 
-    now = datetime.utcnow()
+    now = datetime.now(KL_TZ)
     cutoff_60d = now - timedelta(days=60)
     cutoff_30d = now - timedelta(days=30)
 

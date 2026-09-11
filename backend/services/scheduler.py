@@ -1,4 +1,5 @@
 import asyncio
+import zoneinfo
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,9 +20,47 @@ from services.scraper import (
     FLIGHT_SCHEDULE_REGISTRY
 )
 
+KL_TZ = zoneinfo.ZoneInfo("Asia/Kuala_Lumpur")
+
+def format_kl_iso(dt_val: Any) -> Optional[str]:
+    """
+    Normalizes any datetime or date string into an ISO string with explicit Kuala Lumpur (+08:00) offset.
+    Handles naive datetimes stored in SQLite, existing ISO strings with Z or offsets, and None.
+    """
+    if not dt_val:
+        return None
+    try:
+        if isinstance(dt_val, str):
+            val = dt_val.strip()
+            if not val:
+                return None
+            if "+08:00" in val:
+                return val
+            if val.endswith("Z"):
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00")).astimezone(KL_TZ)
+                return dt.isoformat()
+            if "T" in val or " " in val:
+                clean_val = val.replace(" ", "T")
+                dt = datetime.fromisoformat(clean_val)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=KL_TZ)
+                else:
+                    dt = dt.astimezone(KL_TZ)
+                return dt.isoformat()
+            return val
+        elif isinstance(dt_val, datetime):
+            if dt_val.tzinfo is None:
+                dt = dt_val.replace(tzinfo=KL_TZ)
+            else:
+                dt = dt_val.astimezone(KL_TZ)
+            return dt.isoformat()
+    except Exception as e:
+        print(f"format_kl_iso notice for {dt_val}: {e}")
+    return str(dt_val)
+
 scheduler = BackgroundScheduler()
 
-# Default daily refresh time (02:00 AM UTC / Configurable)
+# Default daily refresh time (02:00 AM Kuala Lumpur Time / GMT+8 / Configurable)
 DEFAULT_DAILY_HOUR = 2
 DEFAULT_DAILY_MINUTE = 0
 CURRENT_DAILY_TIME = "02:00"
@@ -214,7 +253,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
     return_leg1_detail = None
     return_leg2_detail = None
     estimated_price = 0.0
-    now = datetime.utcnow()
+    now = datetime.now(KL_TZ)
     records = []
 
     # Probe candidate dates within the travel range
@@ -511,8 +550,8 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         "status": status,
         "status_message": status_message,
         "is_active": r.is_active,
-        "last_scraped_at": now.isoformat() + "Z",
-        "created_at": r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat()
+        "last_scraped_at": now.isoformat(),
+        "created_at": format_kl_iso(r.created_at) if r.created_at else now.isoformat()
     }
 
     # Always persist in cache so subsequent page visits do not re-scrape and render instantly
@@ -535,8 +574,8 @@ async def async_daily_tracked_routes_scraper_job() -> Dict[str, Any]:
 
     try:
         IS_REFRESHING_NOW = True
-        now = datetime.utcnow()
-        LAST_RUN_TIMESTAMP = now.isoformat() + "Z"
+        now = datetime.now(KL_TZ)
+        LAST_RUN_TIMESTAMP = now.isoformat()
         
         active_routes = db.query(TrackedRoute).filter(TrackedRoute.is_active == True).all()
         for r in active_routes:
@@ -584,7 +623,7 @@ def daily_tracked_routes_scraper_job():
 
 def configure_daily_schedule(time_str: str = "02:00"):
     """
-    Configures the daily cron schedule at a specific time string "HH:MM".
+    Configures the daily cron schedule at a specific time string "HH:MM" (Kuala Lumpur Time / GMT+8).
     """
     global CURRENT_DAILY_TIME, DEFAULT_DAILY_HOUR, DEFAULT_DAILY_MINUTE
     try:
@@ -599,11 +638,11 @@ def configure_daily_schedule(time_str: str = "02:00"):
         if scheduler.running:
             scheduler.add_job(
                 daily_tracked_routes_scraper_job,
-                CronTrigger(hour=hour, minute=minute),
+                CronTrigger(hour=hour, minute=minute, timezone="Asia/Kuala_Lumpur"),
                 id='daily_flight_scraper_cron',
                 replace_existing=True
             )
-            print(f"APScheduler daily cron updated to trigger at {CURRENT_DAILY_TIME} UTC.")
+            print(f"APScheduler daily cron updated to trigger at {CURRENT_DAILY_TIME} MYT (Asia/Kuala_Lumpur, GMT+8).")
     except Exception as e:
         print(f"Configure daily schedule error: {e}")
 
@@ -611,12 +650,12 @@ def start_scheduler():
     if not scheduler.running:
         scheduler.add_job(
             daily_tracked_routes_scraper_job,
-            CronTrigger(hour=DEFAULT_DAILY_HOUR, minute=DEFAULT_DAILY_MINUTE),
+            CronTrigger(hour=DEFAULT_DAILY_HOUR, minute=DEFAULT_DAILY_MINUTE, timezone="Asia/Kuala_Lumpur"),
             id='daily_flight_scraper_cron',
             replace_existing=True
         )
         scheduler.start()
-        print(f"APScheduler daily background flight tracker started (Daily Cron at {CURRENT_DAILY_TIME} UTC).")
+        print(f"APScheduler daily background flight tracker started (Daily Cron at {CURRENT_DAILY_TIME} MYT / GMT+8, Asia/Kuala_Lumpur).")
 
 def stop_scheduler():
     if scheduler.running:
@@ -635,20 +674,22 @@ def get_scheduler_status() -> Dict[str, Any]:
     finally:
         db.close()
 
-    last_dt = LAST_RUN_TIMESTAMP
+    last_dt = format_kl_iso(LAST_RUN_TIMESTAMP)
     if not last_dt and most_recent and most_recent[0]:
-        dt_val = most_recent[0]
-        iso = dt_val.isoformat() if hasattr(dt_val, "isoformat") else str(dt_val).replace(" ", "T")
-        last_dt = iso if iso.endswith("Z") else iso + "Z"
+        last_dt = format_kl_iso(most_recent[0])
 
     job = scheduler.get_job('daily_flight_scraper_cron') if scheduler.running else None
-    next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+    next_run = None
+    if job and job.next_run_time:
+        next_run = format_kl_iso(job.next_run_time)
 
     return {
         "status": "running" if scheduler.running else "stopped",
         "schedule_type": "daily_cron",
         "daily_time": CURRENT_DAILY_TIME,
-        "cron_expression": f"{DEFAULT_DAILY_MINUTE} {DEFAULT_DAILY_HOUR} * * * (Daily at {CURRENT_DAILY_TIME} UTC)",
+        "timezone": "Asia/Kuala_Lumpur",
+        "timezone_offset": "+08:00",
+        "cron_expression": f"{DEFAULT_DAILY_MINUTE} {DEFAULT_DAILY_HOUR} * * * (Daily at {CURRENT_DAILY_TIME} MYT / GMT+8)",
         "next_run_at": next_run,
         "last_run_at": last_dt,
         "tracked_routes_count": active_count,

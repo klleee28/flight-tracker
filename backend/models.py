@@ -1,7 +1,13 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
+import zoneinfo
 from datetime import datetime
 from database import Base
+
+KL_TZ = zoneinfo.ZoneInfo("Asia/Kuala_Lumpur")
+
+def get_current_kl_time() -> datetime:
+    return datetime.now(KL_TZ)
 
 class Hub(Base):
     __tablename__ = "hubs"
@@ -21,7 +27,7 @@ class Route(Base):
     origin = Column(String(5), nullable=False, index=True)
     destination = Column(String(5), nullable=False, index=True)
     is_hub_connection = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_current_kl_time)
 
 class TrackedRoute(Base):
     __tablename__ = "tracked_routes"
@@ -36,7 +42,7 @@ class TrackedRoute(Base):
     cached_flight_data = Column(String, nullable=True)
     last_scraped_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_current_kl_time)
 
 class PriceHistory(Base):
     __tablename__ = "price_history"
@@ -50,4 +56,4 @@ class PriceHistory(Base):
     price = Column(Float, nullable=False)
     currency = Column(String(10), default="SGD")
     is_direct = Column(Boolean, default=True)
-    scraped_at = Column(DateTime, default=datetime.utcnow, index=True)
+    scraped_at = Column(DateTime, default=get_current_kl_time, index=True)

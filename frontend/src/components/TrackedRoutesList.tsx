@@ -24,28 +24,22 @@ function fmtDate(dateStr?: string | null, fallback: string = "N/A"): string {
 function fmtLastRefreshed(dateStr?: string | null): string {
   if (!dateStr || dateStr.trim() === "") return "Pending initial scan";
   try {
-    const normalized = dateStr.includes("T")
-      ? (dateStr.endsWith("Z") ? dateStr : dateStr + "Z")
-      : dateStr.replace(" ", "T") + "Z";
-    const d = new Date(normalized);
-    if (isNaN(d.getTime())) {
-      const d2 = new Date(dateStr);
-      if (isNaN(d2.getTime())) return dateStr;
-      return d2.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+    let normalized = dateStr.trim();
+    if (!normalized.endsWith("Z") && !normalized.includes("+") && !/-\d\d:\d\d$/.test(normalized)) {
+      normalized = normalized.replace(" ", "T") + "+08:00";
     }
-    return d.toLocaleDateString("en-US", {
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return dateStr;
+    const formatted = d.toLocaleDateString("en-US", {
+      timeZone: "Asia/Kuala_Lumpur",
       month: "short",
       day: "numeric",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      hour12: true,
     });
+    return `${formatted} (MYT)`;
   } catch {
     return dateStr;
   }
@@ -55,6 +49,8 @@ export interface ScheduleStatus {
   status: string;
   schedule_type: string;
   daily_time: string;
+  timezone?: string;
+  timezone_offset?: string;
   cron_expression: string;
   next_run_at?: string | null;
   last_run_at?: string | null;
@@ -247,12 +243,12 @@ export default function TrackedRoutesList({
             <div className="font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <span>Daily Scheduled Background Refresh Engine</span>
               <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-500/40 text-[10px] font-extrabold animate-pulse">
-                ACTIVE @ {scheduleStatus?.daily_time || "02:00"} UTC
+                ACTIVE @ {scheduleStatus?.daily_time || "02:00"} MYT (GMT+8)
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-400 font-mono text-[11px] mt-1">
               <span>
-                Refreshes prices for {routes.length} active routes daily at <strong className="text-cyan-300">{scheduleStatus?.daily_time || "02:00"} UTC</strong>
+                Refreshes prices for {routes.length} active routes daily at <strong className="text-cyan-300">{scheduleStatus?.daily_time || "02:00"} MYT (GMT+8)</strong>
               </span>
               <span className="text-slate-600">•</span>
               <span className="flex items-center gap-1.5 text-slate-300">
@@ -266,7 +262,7 @@ export default function TrackedRoutesList({
                 <>
                   <span className="text-slate-600">•</span>
                   <span className="text-cyan-300">
-                    Next Run: {new Date(scheduleStatus.next_run_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                    Next Run: {new Date(scheduleStatus.next_run_at).toLocaleTimeString("en-US", { timeZone: "Asia/Kuala_Lumpur", hour: "2-digit", minute: "2-digit", hour12: true })} (MYT)
                   </span>
                 </>
               )}
@@ -348,12 +344,12 @@ export default function TrackedRoutesList({
               </button>
             </div>
             <p className="text-xs text-slate-400">
-              Configure the exact UTC time when AeroSplit background engine automatically scans and records authentic Google Flights prices for all tracked routes.
+              Configure the exact Kuala Lumpur time (GMT+8 / MYT) when AeroSplit background engine automatically scans and records authentic Google Flights prices for all tracked routes.
             </p>
             <form onSubmit={handleTimeSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
-                  Daily Execution Time (UTC)
+                  Daily Execution Time (Kuala Lumpur Time / GMT+8)
                 </label>
                 <input
                   type="time"

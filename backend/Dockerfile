@@ -18,7 +18,10 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+ENV TZ="Asia/Kuala_Lumpur"
 
 WORKDIR /app
 

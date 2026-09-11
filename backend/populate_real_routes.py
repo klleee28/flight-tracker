@@ -7,6 +7,7 @@ from models import TrackedRoute, PriceHistory
 from services.graph import get_airport_info, has_direct_flight, build_split_route_options
 from services.scraper import fetch_route_price, parse_time_to_minutes
 from services.deals import calculate_route_statistics, evaluate_deal_score
+from services.scheduler import KL_TZ, format_kl_iso
 from datetime import datetime
 
 async def scrape_route(r, db):
@@ -28,7 +29,7 @@ async def scrape_route(r, db):
     leg1_detail = None
     leg2_detail = None
     outbound_price = 0.0
-    now = datetime.utcnow()
+    now = datetime.now(KL_TZ)
 
     if is_direct:
         # Outbound leg is one-way
@@ -173,8 +174,8 @@ async def scrape_route(r, db):
         'return_leg1': return_leg1_detail,
         'return_leg2': return_leg2_detail,
         'is_active': r.is_active,
-        'last_scraped_at': now.isoformat() + 'Z',
-        'created_at': r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat()
+        'last_scraped_at': now.isoformat(),
+        'created_at': format_kl_iso(r.created_at) if r.created_at else now.isoformat()
     }
 
     r.cached_flight_data = json.dumps(route_data)

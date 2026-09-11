@@ -1,6 +1,9 @@
 import asyncio
+import zoneinfo
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
+
+KL_TZ = zoneinfo.ZoneInfo("Asia/Kuala_Lumpur")
 
 try:
     from playwright.async_api import async_playwright
@@ -493,7 +496,7 @@ def generate_realistic_flight_price(
             "cheapest_platform": cheapest_platform,
             "is_available": True,
             "is_next_day": is_next_day,
-            "scraped_at": datetime.utcnow().isoformat(),
+            "scraped_at": datetime.now(KL_TZ).isoformat(),
             "source": "verified_schedule_registry",
         }
     else:
@@ -514,7 +517,7 @@ def generate_realistic_flight_price(
             "cheapest_platform": "N/A",
             "is_available": False,
             "is_next_day": False,
-            "scraped_at": datetime.utcnow().isoformat(),
+            "scraped_at": datetime.now(KL_TZ).isoformat(),
             "source": "route_registry_unsupported",
         }
 
@@ -658,7 +661,7 @@ async def scrape_flight_data_playwright(
                                         "layover_durations": layover_durations,
                                         "price": price_val,
                                         "departure_date": departure_date,
-                                        "scraped_at": datetime.utcnow().isoformat(),
+                                        "scraped_at": datetime.now(KL_TZ).isoformat(),
                                         "source": "google_flights_live",
                                     })
                                     i = arr_idx + 5
@@ -745,7 +748,7 @@ async def fetch_route_price(
                         "cheapest_platform": cheapest_platform,
                         "is_available": True,
                         "is_next_day": False,
-                        "scraped_at": datetime.utcnow().isoformat(),
+                        "scraped_at": datetime.now(KL_TZ).isoformat(),
                         "source": "google_flights_live",
                         "scraper_status": {
                             "is_live": True,
@@ -775,7 +778,7 @@ async def fetch_route_price(
         "cheapest_platform": "N/A",
         "is_available": False,
         "is_next_day": False,
-        "scraped_at": datetime.utcnow().isoformat(),
+        "scraped_at": datetime.now(KL_TZ).isoformat(),
         "source": "google_flights_live_error",
         "scraper_status": {
             "is_live": False,
