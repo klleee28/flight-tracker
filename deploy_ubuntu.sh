@@ -9,20 +9,38 @@ echo "🚀 AeroSplit AI - Automated Ubuntu Deployment Engine"
 echo "=========================================================="
 
 # 1. Pull latest updates automatically from GitHub
-if command -v git &> /dev/null && [ -d ".git" ]; then
+if [ "$1" != "--no-pull" ] && command -v git &> /dev/null && [ -d ".git" ]; then
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     echo "📥 Checking and pulling latest code from GitHub (branch: ${BRANCH})..."
     
-    # Stash any untracked or permission changes so git pull always succeeds cleanly
-    git stash 2>/dev/null || true
+    # Permanently ignore file permission changes (e.g. chmod +x) so git never marks files as modified
+    git config core.fileMode false
     
-    if git pull origin "$BRANCH"; then
-        echo "✅ Successfully updated to latest commit: $(git rev-parse --short HEAD)"
-        echo "   Commit message: $(git log -1 --pretty=%B | head -n 1)"
+    # Automatically discard any local file permission or line ending modifications on tracked deployment files
+    git checkout -- deploy_ubuntu.sh 2>/dev/null || git restore deploy_ubuntu.sh 2>/dev/null || true
+    
+    # Fetch latest remote commits
+    if git fetch origin "$BRANCH"; then
+        LOCAL_HASH=$(git rev-parse HEAD 2>/dev/null || echo "local")
+        REMOTE_HASH=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "remote")
+        
+        if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+            echo "🔄 Updating local files to latest commit (${REMOTE_HASH:0:7})..."
+            # Hard reset ensures merge conflicts and local unstaged changes never block deployments
+            git reset --hard "origin/$BRANCH"
+            chmod +x "$0" 2>/dev/null || true
+            echo "✅ Successfully updated to: $(git log -1 --pretty=%B | head -n 1)"
+            echo "🔁 Re-executing updated deployment script..."
+            exec bash "$0" --no-pull "$@"
+        else
+            echo "✅ Already up-to-date with latest commit: ${LOCAL_HASH:0:7}"
+        fi
     else
-        echo "⚠️ git pull encountered an issue. Continuing with current local files."
+        echo "⚠️ git fetch encountered an issue. Continuing with current local files."
     fi
     chmod +x deploy_ubuntu.sh 2>/dev/null || true
+elif [ "$1" = "--no-pull" ]; then
+    shift
 else
     echo "ℹ️ Not a git repository or git command missing. Skipping git pull."
 fi
