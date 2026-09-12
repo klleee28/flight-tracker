@@ -44,7 +44,8 @@ export default function FlightSearchForm({ onSearch, onStopSearch, isLoading }: 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!origin || !destination) return;
-    onSearch(origin, destination, rangeStart, rangeEnd, tripDuration, tripType);
+    const durationToSend = tripType === "one_way" ? 1 : tripDuration;
+    onSearch(origin, destination, rangeStart, rangeEnd, durationToSend, tripType);
   };
 
   const handleTripTypeChange = (newType: string) => {
@@ -125,10 +126,10 @@ export default function FlightSearchForm({ onSearch, onStopSearch, isLoading }: 
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-lg">🗓️</span>
           <span className="font-extrabold text-white uppercase tracking-wider text-sm">
-            Selected Travel Window:
+            {tripType === "one_way" ? "Selected Departure Window:" : "Selected Travel Window:"}
           </span>
           <span className="font-mono text-cyan-300 font-black bg-cyan-950/90 px-3.5 py-1.5 rounded-xl border border-cyan-500/40 text-base">
-            📅 {rangeStart} ➔ {rangeEnd} ({tripDuration} Days Trip)
+            📅 {rangeStart} ➔ {rangeEnd} {tripType === "one_way" ? "(One-Way Window)" : `(${tripDuration} Days Trip)`}
           </span>
         </div>
         <span className="text-slate-300 font-mono text-xs font-semibold">
@@ -185,7 +186,7 @@ export default function FlightSearchForm({ onSearch, onStopSearch, isLoading }: 
         {/* Travel Window Start Date */}
         <div className="md:col-span-2">
           <label className="block text-sm font-bold text-cyan-300 uppercase tracking-wider mb-2">
-            📅 Range Start Date
+            📅 {tripType === "one_way" ? "Earliest Date" : "Range Start Date"}
           </label>
           <input
             type="date"
@@ -199,7 +200,7 @@ export default function FlightSearchForm({ onSearch, onStopSearch, isLoading }: 
         {/* Travel Window End Date */}
         <div className="md:col-span-2">
           <label className="block text-sm font-bold text-cyan-300 uppercase tracking-wider mb-2">
-            📅 Range End Date
+            📅 {tripType === "one_way" ? "Latest Date" : "Range End Date"}
           </label>
           <input
             type="date"
@@ -211,24 +212,26 @@ export default function FlightSearchForm({ onSearch, onStopSearch, isLoading }: 
         </div>
 
         {/* Trip Duration Flexible Numeric Input */}
-        <div className="md:col-span-1">
-          <label className="block text-sm font-bold text-slate-200 uppercase tracking-wider mb-2">
-            ⏱️ Days
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={60}
-            value={tripDuration}
-            onChange={(e) => setTripDuration(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            required
-            placeholder="e.g. 10"
-            className="w-full bg-slate-950/90 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all font-bold text-sm"
-          />
-        </div>
+        {tripType !== "one_way" && (
+          <div className="md:col-span-1">
+            <label className="block text-sm font-bold text-slate-200 uppercase tracking-wider mb-2">
+              ⏱️ Days
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={tripDuration}
+              onChange={(e) => setTripDuration(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              required
+              placeholder="e.g. 10"
+              className="w-full bg-slate-950/90 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all font-bold text-sm"
+            />
+          </div>
+        )}
 
         {/* Action Buttons: Submit / Stop Search */}
-        <div className="md:col-span-2 flex items-center gap-2">
+        <div className={`${tripType === "one_way" ? "md:col-span-3" : "md:col-span-2"} flex items-center gap-2`}>
           {isLoading ? (
             <button
               type="button"

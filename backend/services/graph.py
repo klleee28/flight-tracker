@@ -245,7 +245,7 @@ def has_direct_flight(origin: str, destination: str) -> bool:
     dest = destination.strip().upper()
     if orig == dest:
         return True
-    return (orig, dest) in FLIGHT_SCHEDULE_REGISTRY
+    return (orig, dest) in KNOWN_DIRECT_ROUTES or (orig, dest) in FLIGHT_SCHEDULE_REGISTRY
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculates distance between two coordinates in km."""

@@ -222,7 +222,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
     is_ret_direct = has_direct_flight(r.destination, r.origin) if is_round_trip else False
     is_direct = is_ob_direct and (is_ret_direct if is_round_trip else True)
 
-    duration = r.trip_duration_days or 7
+    duration = 1 if not is_round_trip else (r.trip_duration_days or 7)
     range_start_str = r.range_start or "2026-10-01"
     range_end_str = r.range_end or "2026-10-31"
 
@@ -232,13 +232,24 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         start_d = datetime.strptime(range_start_str, "%Y-%m-%d")
         end_d = datetime.strptime(range_end_str, "%Y-%m-%d")
         span = (end_d - start_d).days
-        if span > duration:
-            step = max(1, (span - duration) // 2)
-            c2 = (start_d + timedelta(days=step)).strftime("%Y-%m-%d")
-            if c2 not in candidate_dates:
-                candidate_dates.append(c2)
-        elif span >= 2:
-            candidate_dates.append((start_d + timedelta(days=1)).strftime("%Y-%m-%d"))
+        if not is_round_trip:
+            if span >= 3:
+                step = span // 2
+                c2 = (start_d + timedelta(days=step)).strftime("%Y-%m-%d")
+                if c2 not in candidate_dates:
+                    candidate_dates.append(c2)
+            if span >= 1:
+                c3 = end_d.strftime("%Y-%m-%d")
+                if c3 not in candidate_dates:
+                    candidate_dates.append(c3)
+        else:
+            if span > duration:
+                step = max(1, (span - duration) // 2)
+                c2 = (start_d + timedelta(days=step)).strftime("%Y-%m-%d")
+                if c2 not in candidate_dates:
+                    candidate_dates.append(c2)
+            elif span >= 2:
+                candidate_dates.append((start_d + timedelta(days=1)).strftime("%Y-%m-%d"))
     except Exception:
         pass
 
@@ -327,16 +338,21 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
                     currency="SGD", is_direct=True, scraped_at=now
                 ))
 
-        if cand_ob_price == 0 and is_ob_direct:
+        if cand_ob_price == 0:
             ob_data = await fetch_route_price(r.origin, r.destination, outbound_date, allow_live_browser=True)
             if ob_data.get("is_available") and ob_data.get("price", 0) > 0:
                 cand_ob_price = round(ob_data["price"], 2)
                 cand_outbound_legs = expand_leg_with_layovers(ob_data, r.origin, r.destination)
+                if ob_data.get("is_nonstop"):
+                    cand_hub = "DIRECT"
+                    from services.graph import KNOWN_DIRECT_ROUTES
+                    KNOWN_DIRECT_ROUTES.add((r.origin, r.destination))
+                    KNOWN_DIRECT_ROUTES.add((r.destination, r.origin))
                 cand_records.append(PriceHistory(
                     origin=r.origin, destination=r.destination,
                     airline=ob_data["airline"], flight_number=ob_data.get("flight_number", "N/A"),
                     departure_date=outbound_date, price=cand_ob_price,
-                    currency="SGD", is_direct=True, scraped_at=now
+                    currency="SGD", is_direct=ob_data.get("is_nonstop", True), scraped_at=now
                 ))
 
         # 2. SPLIT OUTBOUND (if direct outbound not found or not direct)
@@ -394,18 +410,17 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
 
         # 3. RETURN JOURNEY (if round trip and return leg not already set by direct bundled scrape)
         if is_round_trip and not cand_return_legs:
-            # Check direct return first if destination -> origin has direct operating flight
-            if is_ret_direct:
-                ret_dir = await fetch_route_price(r.destination, r.origin, return_date, allow_live_browser=True)
-                if ret_dir.get("is_available") and ret_dir.get("price", 0) > 0:
-                    cand_ret_price = round(ret_dir["price"], 2)
-                    cand_return_legs = expand_leg_with_layovers(ret_dir, r.destination, r.origin)
-                    cand_records.append(PriceHistory(
-                        origin=r.destination, destination=r.origin,
-                        airline=ret_dir["airline"], flight_number=ret_dir.get("flight_number", "N/A"),
-                        departure_date=return_date, price=cand_ret_price,
-                        currency="SGD", is_direct=True, scraped_at=now
-                    ))
+            # Check direct return first
+            ret_dir = await fetch_route_price(r.destination, r.origin, return_date, allow_live_browser=True)
+            if ret_dir.get("is_available") and ret_dir.get("price", 0) > 0:
+                cand_ret_price = round(ret_dir["price"], 2)
+                cand_return_legs = expand_leg_with_layovers(ret_dir, r.destination, r.origin)
+                cand_records.append(PriceHistory(
+                    origin=r.destination, destination=r.origin,
+                    airline=ret_dir["airline"], flight_number=ret_dir.get("flight_number", "N/A"),
+                    departure_date=return_date, price=cand_ret_price,
+                    currency="SGD", is_direct=ret_dir.get("is_nonstop", True), scraped_at=now
+                ))
 
             # If return not direct or direct return unavailable, check return split options
             if cand_ret_price == 0 and return_splits:

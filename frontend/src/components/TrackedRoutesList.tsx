@@ -152,12 +152,11 @@ export default function TrackedRoutesList({
       return;
     }
 
-    if (newRangeStart >= newRangeEnd) {
-      setSubmitError("Range End date must be after Range Start date.");
-      return;
-    }
-
     if (newTripType === "round_trip") {
+      if (newRangeStart >= newRangeEnd) {
+        setSubmitError("Range End date must be after Range Start date.");
+        return;
+      }
       const startMs = new Date(newRangeStart).getTime();
       const endMs = new Date(newRangeEnd).getTime();
       const diffDays = Math.round((endMs - startMs) / (1000 * 3600 * 24));
@@ -167,12 +166,18 @@ export default function TrackedRoutesList({
         );
         return;
       }
+    } else {
+      if (newRangeStart > newRangeEnd) {
+        setSubmitError("Latest Departure date must be on or after Earliest Departure date.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const result: any = await onAddRoute(newOrigin, newDestination, newRangeStart, newRangeEnd, newDuration, newTripType);
+      const durationToSend = newTripType === "one_way" ? 1 : newDuration;
+      const result: any = await onAddRoute(newOrigin, newDestination, newRangeStart, newRangeEnd, durationToSend, newTripType);
       setShowAddModal(false);
 
       if (result && result.status === "no_route_in_range") {
@@ -554,10 +559,10 @@ export default function TrackedRoutesList({
               </div>
 
               {/* Travel Range & Duration */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className={`grid grid-cols-1 ${newTripType === "one_way" ? "sm:grid-cols-2" : "sm:grid-cols-3"} gap-3`}>
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
-                    Range Start <span className="text-cyan-400">*</span>
+                    {newTripType === "one_way" ? "Earliest Departure" : "Range Start"} <span className="text-cyan-400">*</span>
                   </label>
                   <input
                     type="date"
@@ -569,7 +574,7 @@ export default function TrackedRoutesList({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
-                    Range End <span className="text-cyan-400">*</span>
+                    {newTripType === "one_way" ? "Latest Departure" : "Range End"} <span className="text-cyan-400">*</span>
                   </label>
                   <input
                     type="date"
@@ -579,20 +584,22 @@ export default function TrackedRoutesList({
                     className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white font-mono font-bold focus:outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
-                    Duration (Days) <span className="text-cyan-400">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={newDuration}
-                    onChange={(e) => setNewDuration(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white font-mono font-bold focus:outline-none"
-                  />
-                </div>
+                {newTripType !== "one_way" && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                      Duration (Days) <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={newDuration}
+                      onChange={(e) => setNewDuration(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      required
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white font-mono font-bold focus:outline-none"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons */}
@@ -703,8 +710,14 @@ export default function TrackedRoutesList({
                 {/* Range Period Banner */}
                 <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 text-sm font-mono space-y-1.5 mb-3.5">
                   <div className="flex justify-between text-slate-300">
-                    <span className="text-xs text-cyan-300 font-extrabold">📅 Active Window:</span>
-                    <span className="text-xs text-slate-300 font-bold">{route.trip_duration_days} Days</span>
+                    <span className="text-xs text-cyan-300 font-extrabold">
+                      {route.trip_type === "one_way" ? "📅 Departure Window:" : "📅 Active Window:"}
+                    </span>
+                    <span className="text-xs text-slate-300 font-bold">
+                      {route.trip_type === "one_way"
+                        ? `${Math.max(1, Math.round((new Date(route.range_end).getTime() - new Date(route.range_start).getTime()) / (1000 * 3600 * 24)) + 1)} Days Window`
+                        : `${route.trip_duration_days} Days Trip`}
+                    </span>
                   </div>
                   <div className="text-xs text-white font-black">
                     {route.range_start} ➔ {route.range_end}
@@ -754,7 +767,9 @@ export default function TrackedRoutesList({
                       <span>No Flight Route Found Within Specified Range</span>
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                      {route.status_message || `No operating airlines or connecting flight routes could be verified between ${route.origin.code} and ${route.destination.code} within the travel window (${route.range_start} ➔ ${route.range_end}, ${route.trip_duration_days} days).`}
+                      {route.status_message || (route.trip_type === "one_way"
+                        ? `No operating flight route found for ${route.origin.code} ➔ ${route.destination.code} departing between ${route.range_start} and ${route.range_end}.`
+                        : `No operating airlines or connecting flight routes could be verified between ${route.origin.code} and ${route.destination.code} within the travel window (${route.range_start} ➔ ${route.range_end}, ${route.trip_duration_days} days).`)}
                     </p>
                     <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 text-[11px] text-slate-400 font-mono space-y-1">
                       <div className="flex justify-between">
@@ -766,8 +781,10 @@ export default function TrackedRoutesList({
                         <span className="text-cyan-300 font-bold">{route.range_start} ➔ {route.range_end}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-500">Trip Length:</span>
-                        <span className="text-slate-300 font-bold">{route.trip_duration_days} Days ({route.trip_type === "one_way" ? "One-Way" : "Round-Trip"})</span>
+                        <span className="text-slate-500">{route.trip_type === "one_way" ? "Trip Type:" : "Trip Length:"}</span>
+                        <span className="text-slate-300 font-bold">
+                          {route.trip_type === "one_way" ? "One-Way Flight" : `${route.trip_duration_days} Days (Round-Trip)`}
+                        </span>
                       </div>
                     </div>
                     <div className="text-[11px] text-amber-300/80 flex items-center gap-1.5 pt-0.5">

@@ -280,9 +280,19 @@ async def refresh_single_route(route_id: int, db: Session = Depends(get_db)):
 async def build_route_options(origin: str, destination: str, travel_date: str, db: Session):
     from services.scraper import parse_time_to_minutes
     is_direct_available = has_direct_flight(origin, destination)
-
+    direct_data = None
     if is_direct_available:
         direct_data = await fetch_route_price(origin, destination, travel_date, allow_live_browser=True)
+    else:
+        probe = await fetch_route_price(origin, destination, travel_date, allow_live_browser=True)
+        if probe.get("is_available") and probe.get("price", 0) > 0 and probe.get("is_nonstop"):
+            is_direct_available = True
+            direct_data = probe
+            from services.graph import KNOWN_DIRECT_ROUTES
+            KNOWN_DIRECT_ROUTES.add((origin, destination))
+            KNOWN_DIRECT_ROUTES.add((destination, origin))
+
+    if is_direct_available and direct_data and direct_data.get("is_available") and direct_data.get("price", 0) > 0:
         direct_stats = calculate_route_statistics(db, origin, destination)
         direct_deal = evaluate_deal_score(direct_data["price"], direct_stats["avg_60d"], direct_stats["avg_30d"])
 
@@ -463,9 +473,12 @@ async def search_flight_routes(
 
     start_dt = datetime.strptime(req.range_start or "2026-10-01", "%Y-%m-%d")
     end_dt = datetime.strptime(req.range_end or "2026-10-31", "%Y-%m-%d")
-    duration = req.trip_duration_days or 10
+    duration = 1 if not is_round_trip else (req.trip_duration_days or 10)
 
-    total_days = max(1, (end_dt - start_dt).days - duration)
+    if not is_round_trip:
+        total_days = max(1, (end_dt - start_dt).days)
+    else:
+        total_days = max(1, (end_dt - start_dt).days - duration)
     sample_offsets = [0, total_days // 3, (total_days * 2) // 3, total_days]
 
     best_candidate_price = float("inf")
