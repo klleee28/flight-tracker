@@ -840,6 +840,20 @@ export default function TrackedRoutesList({
                   <div className="text-xs text-white font-black">
                     {route.range_start} ➔ {route.range_end}
                   </div>
+                  {/* Highlight confirmed cheapest flight dates found */}
+                  {route.cheapest_departure_date && !isNoRouteFound && (
+                    <div className="flex justify-between items-center text-[11px] pt-1.5 border-t border-slate-800/80">
+                      <span className="text-emerald-400 font-extrabold flex items-center gap-1">
+                        <span>🌟</span>
+                        <span>Cheapest Date:</span>
+                      </span>
+                      <span className="text-white font-black font-mono bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded-md text-[11px] shadow-sm">
+                        {route.trip_type === "one_way"
+                          ? `🛫 ${fmtDate(route.cheapest_departure_date)}`
+                          : `🛫 ${fmtDate(route.cheapest_departure_date)} → 🛬 ${fmtDate(route.cheapest_return_date)}`}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1.5 border-t border-slate-800/80">
                     <span className="flex items-center gap-1.5 text-slate-400">
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${route.last_scraped_at ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />

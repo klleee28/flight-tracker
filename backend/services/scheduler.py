@@ -226,13 +226,33 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
     range_start_str = r.range_start or "2026-10-01"
     range_end_str = r.range_end or "2026-10-31"
 
-    # Compute candidate outbound departure dates within the range
-    candidate_dates = [range_start_str]
+    # 1. Query Google Flights price calendar for the true cheapest departure date across the entire window
+    cheapest_cal_date = None
+    cheapest_cal_price = 0.0
+    cal_date_prices = {}
+    try:
+        from services.scraper import get_cheapest_flight_date
+        cheapest_cal_date, cheapest_cal_price, cal_date_prices = await get_cheapest_flight_date(
+            r.origin, r.destination, range_start_str, range_end_str,
+            duration=duration, is_round_trip=is_round_trip
+        )
+    except Exception as cal_err:
+        print(f"Notice: calendar price check error for route {r.id}: {cal_err}")
+
+    # Prioritize the confirmed cheapest date from the calendar
+    candidate_dates = []
+    if cheapest_cal_date:
+        candidate_dates.append(cheapest_cal_date)
+
+    # Compute candidate outbound departure dates within the range as backups
     try:
         start_d = datetime.strptime(range_start_str, "%Y-%m-%d")
         end_d = datetime.strptime(range_end_str, "%Y-%m-%d")
         span = (end_d - start_d).days
         if not is_round_trip:
+            for d in [range_start_str]:
+                if d not in candidate_dates:
+                    candidate_dates.append(d)
             if span >= 3:
                 step = span // 2
                 c2 = (start_d + timedelta(days=step)).strftime("%Y-%m-%d")
@@ -243,15 +263,21 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
                 if c3 not in candidate_dates:
                     candidate_dates.append(c3)
         else:
+            for d in [range_start_str]:
+                if d not in candidate_dates:
+                    candidate_dates.append(d)
             if span > duration:
                 step = max(1, (span - duration) // 2)
                 c2 = (start_d + timedelta(days=step)).strftime("%Y-%m-%d")
                 if c2 not in candidate_dates:
                     candidate_dates.append(c2)
             elif span >= 2:
-                candidate_dates.append((start_d + timedelta(days=1)).strftime("%Y-%m-%d"))
+                c_next = (start_d + timedelta(days=1)).strftime("%Y-%m-%d")
+                if c_next not in candidate_dates:
+                    candidate_dates.append(c_next)
     except Exception:
-        pass
+        if not candidate_dates:
+            candidate_dates.append(range_start_str)
 
     splits = build_split_route_options(r.origin, r.destination)
     return_splits = build_split_route_options(r.destination, r.origin) if is_round_trip else []
@@ -266,6 +292,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
     estimated_price = 0.0
     now = datetime.now(KL_TZ)
     records = []
+    best_candidate_package = None
 
     # Probe candidate dates within the travel range
     for outbound_date in candidate_dates:
@@ -479,23 +506,35 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
                         ))
                         break
 
-        # 4. TRIP COMPLETION VERIFICATION
+        # 4. TRIP COMPLETION VERIFICATION & MINIMUM FARE OPTIMIZATION
         if is_round_trip:
-            if cand_ob_price > 0 and cand_ret_price > 0 and len(cand_outbound_legs) > 0 and len(cand_return_legs) > 0:
-                outbound_legs = cand_outbound_legs
-                return_legs = cand_return_legs
-                best_hub = cand_hub
-                estimated_price = round(cand_ob_price + cand_ret_price, 2)
-                records = cand_records
-                break
+            is_valid_cand = cand_ob_price > 0 and cand_ret_price > 0 and len(cand_outbound_legs) > 0 and len(cand_return_legs) > 0
+            cand_tot_price = round(cand_ob_price + cand_ret_price, 2)
         else:
-            if cand_ob_price > 0 and len(cand_outbound_legs) > 0:
-                outbound_legs = cand_outbound_legs
-                return_legs = []
-                best_hub = cand_hub
-                estimated_price = round(cand_ob_price, 2)
-                records = cand_records
+            is_valid_cand = cand_ob_price > 0 and len(cand_outbound_legs) > 0
+            cand_tot_price = round(cand_ob_price, 2)
+
+        if is_valid_cand:
+            if best_candidate_package is None or cand_tot_price < best_candidate_package["total_price"]:
+                best_candidate_package = {
+                    "outbound_legs": cand_outbound_legs,
+                    "return_legs": cand_return_legs,
+                    "best_hub": cand_hub,
+                    "total_price": cand_tot_price,
+                    "records": cand_records,
+                    "dep_date": outbound_date,
+                    "ret_date": return_date,
+                }
+            # If this is already the confirmed calendar cheapest date, we have the global minimum!
+            if outbound_date == cheapest_cal_date:
                 break
+
+    if best_candidate_package:
+        outbound_legs = best_candidate_package["outbound_legs"]
+        return_legs = best_candidate_package["return_legs"]
+        best_hub = best_candidate_package["best_hub"]
+        estimated_price = best_candidate_package["total_price"]
+        records = best_candidate_package["records"]
 
     # Determine status & diagnostic message
     if is_round_trip:
@@ -508,9 +547,9 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         dep_date_used = outbound_legs[0].get("departure_date", range_start_str) if outbound_legs else range_start_str
         ret_date_used = return_legs[0].get("departure_date", range_end_str) if return_legs else range_end_str
         if is_round_trip:
-            status_message = f"Live round-trip flight verified: Outbound {dep_date_used}, Return {ret_date_used}."
+            status_message = f"Cheapest verified round-trip flight found: Outbound {dep_date_used}, Return {ret_date_used} (S${estimated_price})."
         else:
-            status_message = f"Live one-way flight verified departing {dep_date_used}."
+            status_message = f"Cheapest verified one-way flight found departing {dep_date_used} (S${estimated_price})."
     else:
         # If scraper timed out or had temporary network failure, preserve valid existing cached flight data
         if r.cached_flight_data:
@@ -569,6 +608,8 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
         "has_direct_flight": is_direct,
         "best_hub": best_hub,
         "estimated_price": estimated_price,
+        "cheapest_departure_date": dep_date_used if is_complete else None,
+        "cheapest_return_date": (ret_date_used if is_round_trip else None) if is_complete else None,
         "avg_60d": stats["avg_60d"],
         "deal_info": deal_info,
         "outbound_legs": outbound_legs,

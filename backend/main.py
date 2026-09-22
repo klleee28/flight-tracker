@@ -523,7 +523,30 @@ async def search_flight_routes(
     date_candidates_summary = []
 
     try:
-        outbound_date = req.departure_date or req.range_start or "2026-10-15"
+        range_start_str = req.range_start or "2026-10-01"
+        range_end_str = req.range_end or "2026-10-31"
+
+        # 1. Discover the true cheapest date across the entire date window via Google Flights price calendar
+        cheapest_cal_date = None
+        cal_date_prices = {}
+        try:
+            from services.scraper import get_cheapest_flight_date
+            cheapest_cal_date, _, cal_date_prices = await get_cheapest_flight_date(
+                orig, dest, range_start_str, range_end_str,
+                duration=duration, is_round_trip=is_round_trip
+            )
+        except Exception as e:
+            print(f"Calendar search error: {e}")
+
+        # If user explicitly pinned a departure_date that is different from range_start, respect it;
+        # otherwise, use the confirmed cheapest date in the range!
+        if req.departure_date and req.departure_date != range_start_str:
+            outbound_date = req.departure_date
+        elif cheapest_cal_date:
+            outbound_date = cheapest_cal_date
+        else:
+            outbound_date = req.range_start or "2026-10-15"
+
         return_date = req.return_date or (
             (datetime.strptime(outbound_date, "%Y-%m-%d") + timedelta(days=duration)).strftime("%Y-%m-%d")
             if is_round_trip else None
@@ -582,8 +605,16 @@ async def search_flight_routes(
         for idx, offset in enumerate(sample_offsets):
             cand_dep = (start_dt + timedelta(days=offset)).strftime("%Y-%m-%d")
             cand_ret = (start_dt + timedelta(days=offset + duration)).strftime("%Y-%m-%d") if is_round_trip else None
-            cand_split_price = round(total_rt_split, 2) if total_rt_split > 0 else 0.0
-            cand_direct_price = round(total_rt_direct, 2) if total_rt_direct > 0 else 0.0
+            
+            # Use authentic calendar price if available for this candidate date
+            if cand_dep in cal_date_prices:
+                cal_p = cal_date_prices[cand_dep]
+                cand_split_price = round(cal_p, 2)
+                cand_direct_price = round(cal_p, 2)
+            else:
+                cand_split_price = round(total_rt_split, 2) if total_rt_split > 0 else 0.0
+                cand_direct_price = round(total_rt_direct, 2) if total_rt_direct > 0 else 0.0
+                
             cand_savings = round(cand_direct_price - cand_split_price, 2) if cand_direct_price > 0 else 0.0
 
             if cand_split_price < best_candidate_price:
@@ -600,9 +631,30 @@ async def search_flight_routes(
                 "is_cheapest_in_range": False
             })
 
-        if date_candidates_summary:
-            date_candidates_summary[best_candidate_idx]["is_cheapest_in_range"] = True
-            chosen_candidate = date_candidates_summary[best_candidate_idx]
+        # Ensure the confirmed cheapest date from the calendar is always in date_candidates_summary
+        if cheapest_cal_date and not any(c["departure_date"] == cheapest_cal_date for c in date_candidates_summary):
+            cal_p = cal_date_prices.get(cheapest_cal_date, total_rt_split)
+            cand_ret = (datetime.strptime(cheapest_cal_date, "%Y-%m-%d") + timedelta(days=duration)).strftime("%Y-%m-%d") if is_round_trip else None
+            date_candidates_summary.append({
+                "departure_date": cheapest_cal_date,
+                "return_date": cand_ret,
+                "direct_price": round(cal_p, 2),
+                "best_split_price": round(cal_p, 2),
+                "best_hub": outbound_splits[0]["hub"]["code"] if outbound_splits else ("DIRECT" if total_rt_direct > 0 else "N/A"),
+                "savings": 0.0,
+                "is_cheapest_in_range": False
+            })
+
+        # Find the true minimum in date_candidates_summary
+        valid_candidates = [c for c in date_candidates_summary if c["best_split_price"] > 0]
+        if valid_candidates:
+            min_cand = min(valid_candidates, key=lambda c: c["best_split_price"])
+            for c in date_candidates_summary:
+                c["is_cheapest_in_range"] = (c["departure_date"] == min_cand["departure_date"])
+            chosen_candidate = min_cand
+        elif date_candidates_summary:
+            date_candidates_summary[0]["is_cheapest_in_range"] = True
+            chosen_candidate = date_candidates_summary[0]
         else:
             chosen_candidate = {
                 "departure_date": outbound_date, "return_date": return_date,
@@ -612,14 +664,14 @@ async def search_flight_routes(
         db.commit()
 
         range_analysis = {
-            "range_start": req.range_start or "2026-10-01",
-            "range_end": req.range_end or "2026-10-31",
+            "range_start": range_start_str,
+            "range_end": range_end_str,
             "trip_duration_days": duration,
             "cheapest_departure_date": chosen_candidate["departure_date"],
             "cheapest_return_date": chosen_candidate.get("return_date") or chosen_candidate["departure_date"],
             "cheapest_package_price": round(chosen_candidate["best_split_price"], 2),
             "cheapest_hub": chosen_candidate["best_hub"],
-            "max_range_savings": round(chosen_candidate["savings"], 2),
+            "max_range_savings": round(chosen_candidate.get("savings", 0.0), 2),
             "date_candidates": date_candidates_summary
         }
 

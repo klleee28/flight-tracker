@@ -787,3 +787,96 @@ async def fetch_route_price(
             "message": f"Unable to fetch live flight data for {origin} ➔ {destination} on {departure_date} (Timeout or Google Flights Rate Limited)."
         }
     }
+
+
+async def get_cheapest_flight_date(
+    origin: str,
+    destination: str,
+    range_start: str,
+    range_end: str,
+    duration: int = 7,
+    is_round_trip: bool = True
+) -> Tuple[Optional[str], float, Dict[str, float]]:
+    """
+    Extracts authentic real-time Google Flights prices across an entire date range 
+    using the live Google Flights interactive price calendar.
+    Returns (cheapest_departure_date, cheapest_price, all_date_prices).
+    """
+    date_prices: Dict[str, float] = {}
+    cheapest_date = None
+    cheapest_price = 0.0
+
+    if not PLAYWRIGHT_AVAILABLE:
+        return None, 0.0, {}
+
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    sem = get_semaphore()
+    async with sem:
+        try:
+            from datetime import timedelta
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-infobars",
+                        "--window-size=1280,800",
+                    ],
+                )
+                context = await browser.new_context(user_agent=user_agent, viewport={"width": 1280, "height": 800})
+                page = await context.new_page()
+                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
+
+                if is_round_trip:
+                    try:
+                        init_ret = (datetime.strptime(range_start, "%Y-%m-%d") + timedelta(days=duration)).strftime("%Y-%m-%d")
+                    except Exception:
+                        init_ret = range_end
+                    url = (
+                        f"https://www.google.com/travel/flights"
+                        f"?q=round+trip+flights+from+{origin}+to+{destination}+departing+{range_start}+returning+{init_ret}&curr=SGD&hl=en"
+                    )
+                else:
+                    url = (
+                        f"https://www.google.com/travel/flights"
+                        f"?q=one+way+flights+from+{origin}+to+{destination}+on+{range_start}&curr=SGD&hl=en"
+                    )
+
+                await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_timeout(3500)
+
+                # Click Departure input to open calendar overlay
+                dep_input = await page.query_selector('input[aria-label*="Departure"]')
+                if dep_input:
+                    await dep_input.click()
+                    await page.wait_for_timeout(3500)
+
+                    # Extract date prices
+                    import re
+                    day_elements = await page.query_selector_all('div[data-iso]')
+                    for el in day_elements:
+                        iso = await el.get_attribute('data-iso')
+                        if not iso or iso < range_start or iso > range_end:
+                            continue
+                        txt = await el.inner_text()
+                        m = re.search(r'\$\s*([\d,]+)', txt)
+                        if m:
+                            price = float(m.group(1).replace(',', ''))
+                            date_prices[iso] = price
+
+                await browser.close()
+        except Exception as e:
+            print(f"[Calendar] Extraction notice for {origin}->{destination}: {e}")
+
+    if date_prices:
+        cheapest_date = min(date_prices, key=date_prices.get)
+        cheapest_price = date_prices[cheapest_date]
+
+    return cheapest_date, cheapest_price, date_prices
+

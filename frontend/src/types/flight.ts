@@ -149,6 +149,8 @@ export interface TrackedRouteItem {
   has_direct_flight: boolean;
   best_hub: string;
   estimated_price: number;
+  cheapest_departure_date?: string | null;
+  cheapest_return_date?: string | null;
   avg_60d: number;
   deal_info: DealInfo;
   outbound_legs?: TrackedLegDetail[];
