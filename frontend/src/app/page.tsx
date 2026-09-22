@@ -159,13 +159,15 @@ export default function Home() {
     rangeStart: string,
     rangeEnd: string,
     tripDuration: number,
-    tripType: string
+    tripType: string,
+    title?: string
   ): Promise<any> => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/tracked-routes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          title: title || "",
           origin,
           destination,
           range_start: rangeStart,
@@ -185,6 +187,27 @@ export default function Home() {
     } catch (err) {
       console.error("Add tracked route error:", err);
       throw err;
+    }
+  };
+
+  const handleUpdateTrackedRouteTitle = async (id: number, title: string) => {
+    // Optimistic UI update so users see the new title immediately
+    setTrackedRoutes((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, title } : r))
+    );
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tracked-routes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || "Failed to update route title.");
+      }
+    } catch (err) {
+      console.error("Update tracked route title error:", err);
+      await fetchTrackedRoutes();
     }
   };
 
@@ -360,6 +383,7 @@ export default function Home() {
           scheduleStatus={scheduleStatus}
           onSelectRoute={handleSearch}
           onAddRoute={handleAddTrackedRoute}
+          onUpdateRouteTitle={handleUpdateTrackedRouteTitle}
           onDeleteRoute={handleDeleteTrackedRoute}
           onRefreshSingleRoute={handleRefreshSingleRoute}
           onTriggerRefreshNow={handleTriggerDailyRefreshNow}

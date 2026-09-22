@@ -33,6 +33,7 @@ class TrackedRoute(Base):
     __tablename__ = "tracked_routes"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String(100), nullable=True, default="")
     origin = Column(String(5), nullable=False, index=True)
     destination = Column(String(5), nullable=False, index=True)
     range_start = Column(String(20), nullable=False, default="2026-10-01")

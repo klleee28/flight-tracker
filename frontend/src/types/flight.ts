@@ -139,6 +139,7 @@ export interface TrackedLegDetail {
 
 export interface TrackedRouteItem {
   id: number;
+  title?: string | null;
   origin: Airport;
   destination: Airport;
   range_start: string;

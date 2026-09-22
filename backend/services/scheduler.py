@@ -517,6 +517,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
             try:
                 prev_cache = json.loads(r.cached_flight_data)
                 if prev_cache.get("status") == "available" and prev_cache.get("estimated_price", 0) > 0:
+                    prev_cache["title"] = getattr(r, "title", "") or ""
                     prev_cache["last_scraped_at"] = now.isoformat()
                     r.cached_flight_data = json.dumps(prev_cache)
                     r.last_scraped_at = now
@@ -558,6 +559,7 @@ async def refresh_tracked_route_data(r: TrackedRoute, db) -> Dict[str, Any]:
 
     route_dict = {
         "id": r.id,
+        "title": getattr(r, "title", "") or "",
         "origin": orig_info,
         "destination": dest_info,
         "range_start": r.range_start,

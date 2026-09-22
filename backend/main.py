@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
-from database import engine, Base, get_db
+from database import engine, Base, get_db, ensure_db_migrations
 from sqlalchemy.orm import Session
 from models import Hub, Route, PriceHistory, TrackedRoute
 from services.graph import HUBS as ASIAN_HUBS, build_split_route_options, get_airport_info, has_direct_flight
@@ -28,8 +28,9 @@ from services.scheduler import (
 )
 from services.scraper import LCC_AIRLINES, build_platform_price_breakdown
 
-# Create DB tables on startup
+# Create DB tables and run automatic migrations on startup
 Base.metadata.create_all(bind=engine)
+ensure_db_migrations()
 
 app = FastAPI(
     title="AeroSplit AI Flight Tracker API",
@@ -103,12 +104,16 @@ class SearchRequest(BaseModel):
     trip_type: Optional[str] = "round_trip"
 
 class CreateTrackedRouteRequest(BaseModel):
+    title: Optional[str] = None
     origin: str
     destination: str
     range_start: Optional[str] = "2026-10-01"
     range_end: Optional[str] = "2026-10-31"
     trip_duration_days: Optional[int] = 10
     trip_type: Optional[str] = "round_trip"
+
+class UpdateTrackedRouteRequest(BaseModel):
+    title: Optional[str] = None
 
 class SchedulerConfigRequest(BaseModel):
     daily_time: str
@@ -189,6 +194,7 @@ async def get_tracked_routes(refresh: bool = False, db: Session = Depends(get_db
         if not refresh and r.cached_flight_data:
             try:
                 cached = json.loads(r.cached_flight_data)
+                cached["title"] = getattr(r, "title", "") or ""
                 stats = calculate_route_statistics(db, r.origin, r.destination)
                 est_price = cached.get("estimated_price", 0.0)
                 deal_info = evaluate_deal_score(est_price, stats["avg_60d"], stats["avg_30d"])
@@ -224,7 +230,11 @@ async def create_tracked_route(req: CreateTrackedRouteRequest, db: Session = Dep
         TrackedRoute.is_active == True
     ).first()
 
+    clean_title = req.title.strip() if req.title else ""
+
     if existing:
+        if req.title is not None:
+            existing.title = clean_title
         existing.range_start = req.range_start or "2026-10-01"
         existing.range_end = req.range_end or "2026-10-31"
         existing.trip_duration_days = req.trip_duration_days or 10
@@ -235,6 +245,7 @@ async def create_tracked_route(req: CreateTrackedRouteRequest, db: Session = Dep
         target_route = existing
     else:
         new_route = TrackedRoute(
+            title=clean_title,
             origin=orig,
             destination=dest,
             range_start=req.range_start or "2026-10-01",
@@ -252,6 +263,31 @@ async def create_tracked_route(req: CreateTrackedRouteRequest, db: Session = Dep
     from services.scheduler import refresh_tracked_route_data
     route_dict = await refresh_tracked_route_data(target_route, db)
     return route_dict
+
+@app.patch("/api/tracked-routes/{route_id}")
+@app.put("/api/tracked-routes/{route_id}")
+def update_tracked_route(route_id: int, req: UpdateTrackedRouteRequest, db: Session = Depends(get_db)):
+    """
+    Updates tracked route metadata (e.g. user-defined title / trip purpose).
+    """
+    route = db.query(TrackedRoute).filter(TrackedRoute.id == route_id, TrackedRoute.is_active == True).first()
+    if not route:
+        raise HTTPException(status_code=404, detail="Active tracked route not found.")
+
+    if req.title is not None:
+        route.title = req.title.strip()
+        if route.cached_flight_data:
+            try:
+                import json
+                cached = json.loads(route.cached_flight_data)
+                cached["title"] = route.title
+                route.cached_flight_data = json.dumps(cached)
+            except Exception:
+                pass
+
+    db.commit()
+    db.refresh(route)
+    return {"status": "updated", "id": route.id, "title": route.title}
 
 @app.delete("/api/tracked-routes/{route_id}")
 def delete_tracked_route(route_id: int, db: Session = Depends(get_db)):

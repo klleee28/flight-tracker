@@ -75,8 +75,10 @@ interface Props {
     rangeStart: string,
     rangeEnd: string,
     tripDuration: number,
-    tripType: string
+    tripType: string,
+    title?: string
   ) => Promise<any>;
+  onUpdateRouteTitle?: (id: number, title: string) => Promise<void>;
   onDeleteRoute: (id: number) => Promise<void>;
   onRefreshSingleRoute?: (id: number) => Promise<void>;
   onTriggerRefreshNow?: () => Promise<void>;
@@ -89,6 +91,7 @@ export default function TrackedRoutesList({
   scheduleStatus,
   onSelectRoute,
   onAddRoute,
+  onUpdateRouteTitle,
   onDeleteRoute,
   onRefreshSingleRoute,
   onTriggerRefreshNow,
@@ -116,6 +119,7 @@ export default function TrackedRoutesList({
 
   const [customTime, setCustomTime] = useState(scheduleStatus?.daily_time || "02:00");
   
+  const [newTitle, setNewTitle] = useState("");
   const [newOrigin, setNewOrigin] = useState("BWN");
   const [newDestination, setNewDestination] = useState("KUL");
   const [newRangeStart, setNewRangeStart] = useState("2026-10-01");
@@ -123,6 +127,35 @@ export default function TrackedRoutesList({
   const [newDuration, setNewDuration] = useState(10);
   const [newTripType, setNewTripType] = useState("round_trip");
   
+  // Title editing state
+  const [editingRouteId, setEditingRouteId] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+
+  const handleStartEditTitle = (route: TrackedRouteItem) => {
+    setEditingRouteId(route.id);
+    setEditingTitle(route.title || "");
+  };
+
+  const handleCancelEditTitle = () => {
+    setEditingRouteId(null);
+    setEditingTitle("");
+  };
+
+  const handleSaveTitle = async (routeId: number) => {
+    if (!onUpdateRouteTitle) return;
+    setIsSavingTitle(true);
+    try {
+      await onUpdateRouteTitle(routeId, editingTitle.trim());
+      setEditingRouteId(null);
+      setEditingTitle("");
+    } catch (err) {
+      console.error("Failed to save route title:", err);
+    } finally {
+      setIsSavingTitle(false);
+    }
+  };
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -177,8 +210,17 @@ export default function TrackedRoutesList({
     setSubmitError(null);
     try {
       const durationToSend = newTripType === "one_way" ? 1 : newDuration;
-      const result: any = await onAddRoute(newOrigin, newDestination, newRangeStart, newRangeEnd, durationToSend, newTripType);
+      const result: any = await onAddRoute(
+        newOrigin,
+        newDestination,
+        newRangeStart,
+        newRangeEnd,
+        durationToSend,
+        newTripType,
+        newTitle.trim()
+      );
       setShowAddModal(false);
+      setNewTitle("");
 
       if (result && result.status === "no_route_in_range") {
         setRefreshFeedback({
@@ -495,6 +537,21 @@ export default function TrackedRoutesList({
             </div>
 
             <form onSubmit={handleCreate} className="space-y-3">
+              {/* Trip Title / Purpose (Optional) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
+                  Tracking Title / Purpose <span className="text-slate-500 font-normal normal-case">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="e.g. Family Year-End Vacation, Japan Trip, Tech Conference"
+                  maxLength={80}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none"
+                />
+              </div>
+
               {/* Origin & Destination Inputs */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -684,8 +741,69 @@ export default function TrackedRoutesList({
                   : "bg-slate-950/70 border-slate-800"
               }`}
             >
-              {/* Card Header: Airport Pair & Badges */}
+              {/* Card Header: Editable Title & Airport Pair */}
               <div>
+                {/* Editable Title Section Above Tracking */}
+                <div className="mb-2.5 pb-2 border-b border-slate-800/80">
+                  {editingRouteId === route.id ? (
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveTitle(route.id);
+                          if (e.key === "Escape") handleCancelEditTitle();
+                        }}
+                        placeholder="e.g. Summer Vacation, Tokyo Trip"
+                        autoFocus
+                        maxLength={80}
+                        className="w-full bg-slate-900 border border-cyan-400 focus:ring-1 focus:ring-cyan-400 rounded-lg px-2.5 py-1 text-xs text-white font-bold placeholder:text-slate-600 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveTitle(route.id)}
+                        disabled={isSavingTitle}
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black transition-all shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-sm"
+                        title="Save Title (Enter)"
+                      >
+                        {isSavingTitle ? "..." : "✓ Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelEditTitle}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer"
+                        title="Cancel (Esc)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      className="group flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                      onClick={() => handleStartEditTitle(route)}
+                      title="Click to edit tracking title"
+                    >
+                      {route.title && route.title.trim() ? (
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-extrabold text-xs tracking-tight truncate group-hover:border-cyan-400 group-hover:text-cyan-200 transition-colors">
+                            <span>🏷️</span>
+                            <span className="truncate">{route.title}</span>
+                          </span>
+                          <span className="opacity-0 group-hover:opacity-100 text-[11px] text-slate-400 hover:text-cyan-300 transition-opacity shrink-0">
+                            ✏️
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500 group-hover:text-cyan-400 transition-colors">
+                          <span className="text-[11px] font-medium italic">+ Add Title / Note</span>
+                          <span className="text-[10px] opacity-60 group-hover:opacity-100">✏️</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center justify-between gap-2 mb-2.5">
                   <div className="flex items-center gap-2 font-mono text-lg font-black text-white">
                     <span>{route.origin.code}</span>
